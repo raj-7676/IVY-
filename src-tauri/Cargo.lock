@@ -112,6 +112,7 @@ dependencies = [
  "enigo",
  "hound",
  "llama-cpp-2",
+ "llama-cpp-sys-2",
  "log",
  "mel_spec",
  "ndarray 0.17.2",

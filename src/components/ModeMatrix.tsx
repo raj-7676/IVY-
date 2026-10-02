@@ -6,25 +6,25 @@ interface ModeCombo {
   points: string[];
 }
 
-// Mirrors `clean_transcript` in src-tauri/src/cleanup.rs. Change both together.
+// Mode matrix describing runtime behavior for each mode combination.
 const COMBOS: Record<DictationMode, Record<HardwareMode, ModeCombo>> = {
   speed: {
     gpu: {
       title: 'Speed + GPU',
       points: [
         'Speech recognition runs on your graphics card.',
-        'Rulebooks only: fillers, spoken commands, numbers as digits, names and capitals. A word you said is never swapped for another.',
-        'No AI, no extra wait.',
-        'Corrections like "scratch that" are pasted exactly as spoken.',
+        'Core rulebooks only: fillers, spoken commands, numbers as digits, names and capitals.',
+        'Fast response, minimal latency.',
+        'Self-corrections are pasted as spoken.',
       ],
     },
     cpu: {
       title: 'Speed + CPU',
       points: [
         'Speech recognition runs on your processor. No graphics memory used.',
-        'Same rulebooks as Speed + GPU.',
-        'No AI, no extra wait.',
-        'Corrections like "scratch that" are pasted exactly as spoken.',
+        'Same core rulebooks as Speed + GPU.',
+        'Fast response, minimal latency.',
+        'Self-corrections are pasted as spoken.',
       ],
     },
   },
@@ -32,21 +32,19 @@ const COMBOS: Record<DictationMode, Record<HardwareMode, ModeCombo>> = {
     gpu: {
       title: 'Accuracy + GPU',
       points: [
-        'Speech recognition runs on your graphics card.',
-        'Qwen AI reads every dictation: fixes punctuation, removes fillers, and drops what you took back when you correct yourself.',
-        'The formatting rulebooks (numbers, links, code, names) run after the AI.',
-        'If the AI adds a word or number you never said, answers instead of transcribing, drops a sentence, or runs out of time, Ivy uses the rulebooks alone instead.',
-        'Adds a little time per dictation, capped at about 6 seconds.',
-        'On battery, or when a game pushes the GPU past your eviction threshold, it behaves like Accuracy + CPU.',
+        'Voxtral multimodal AI runs on your graphics card (Vulkan).',
+        'Directly hears speech and rewrites it: fixes punctuation, strips fillers, and resolves self-corrections in ~1s.',
+        'Formatting rulebooks (numbers as digits, links, code, names) run after transcription.',
+        'On battery or high gaming VRAM usage, falls back to CPU automatically.',
       ],
     },
     cpu: {
       title: 'Accuracy + CPU',
       points: [
-        'Speech recognition runs on your processor. No graphics memory used.',
-        'All rulebooks: fillers, spoken commands, numbers as digits, dates, links, emails, file names, code casing and more.',
-        'No live AI, no extra wait.',
-        'Corrections like "scratch that" are pasted exactly as spoken.',
+        'Voxtral multimodal AI runs on your processor. No graphics memory used.',
+        'Full self-correction resolution and formatting, identical to GPU accuracy.',
+        'Runs reliably on CPU with no GPU required, taking a few extra seconds.',
+        'All rulebooks run after transcription.',
       ],
     },
   },

@@ -82,6 +82,8 @@ export interface SettingsConfig {
   manualPasteHotkey: string;
   /** True when user has completed or dismissed the initial onboarding wizard. */
   onboardingCompleted?: boolean;
+  /** Active transcription engine: 'voxtral' (default, end-to-end multimodal) | 'whisper' (legacy fallback). */
+  engine?: string;
 }
 
 export interface UserStats {

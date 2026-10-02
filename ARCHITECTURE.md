@@ -26,8 +26,9 @@ graph TD
     subgraph Backend["Backend Layer (Native System Core / Rust)"]
         CORE["Tauri App Core (main.rs, lib.rs)"]
         AUDIO["Audio Capture & Isolation (audio.rs - CPAL)"]
-        STT["Speech-to-Text Engine (stt.rs - Whisper large-v3-turbo ONNX)"]
-        CLEANUP["Cleanup & AI Engine (cleanup.rs - Rules + Qwen 2.5)"]
+        VOXTRAL["Multimodal Engine (voxtral.rs - Voxtral Mini 3B GGUF + LoRA)"]
+        STT["Fallback STT (stt.rs - Whisper large-v3-turbo ONNX)"]
+        RULEBOOKS["Formatting Rulebooks (rulebooks/ - 9 Books)"]
         GPU["Hardware & VRAM Telemetry (gpu_monitor.rs - DXGI)"]
         WIN32["OS Automation (Win32 SendInput, Clipboard, Hooks)"]
     end
@@ -37,8 +38,9 @@ graph TD
     INVOKE --> CAPS --> CORE
     CORE --> EVENTS --> UI_CAPSULE
     CORE --> AUDIO
+    CORE --> VOXTRAL
     CORE --> STT
-    CORE --> CLEANUP
+    CORE --> RULEBOOKS
     CORE --> GPU
     CORE --> WIN32
 ```
@@ -92,15 +94,16 @@ The backend resides in `src-tauri/` and executes all OS integrations, audio capt
 | :--- | :--- | :--- |
 | `src-tauri/src/main.rs` | Windows Entry Point | Configures WebView2 runtime flags (e.g. `--autoplay-policy=no-user-gesture-required`) and starts `app_lib::run()`. |
 | `src-tauri/src/lib.rs` | Core & IPC Controller | Tauri v2 setup, system tray, global shortcut listener, IPC command registration, and Win32 clipboard injection. |
-| `src-tauri/src/audio.rs` | Audio Pipeline | Dedicated thread wrapper for `cpal` to isolate COM state, DAGC gain normalization, and RAM sample zeroization. |
-| `src-tauri/src/stt.rs` | Speech-to-Text | Whisper large-v3-turbo int8 ONNX inference via `ort` (fixed 30s encoder window), DirectML GPU acceleration with automatic CPU fallback, greedy decoding with dictionary hotword biasing. |
-| `src-tauri/src/cleanup.rs` | Cleanup & LLM | 50+ deterministic rules (<0.5ms) + local Qwen 2.5 3B via `llama-cpp-2` (Vulkan): live cleanup in GPU Accuracy mode behind a faithfulness guard, plus on-demand Touch Up & Summarization. |
+| `src-tauri/src/voxtral.rs` | Multimodal Engine | Voxtral Mini 3B 2507 + Ivy LoRA via `llama-cpp-2` (Vulkan GPU/CPU): end-to-end speech-to-corrected-text, plus LoRA-off Touch Up & Summarization. |
+| `src-tauri/src/stt.rs` | Fallback STT | Whisper large-v3-turbo int8 ONNX inference via `ort` (fixed 30s encoder window), DirectML GPU acceleration with automatic CPU fallback. |
+| `src-tauri/src/cleanup.rs` | Fallback Cleanup | Deterministic cleanup wrapper for Whisper fallback path (rules-only). |
+| `src-tauri/src/rulebooks/` | Rulebooks Pipeline | 9 deterministic post-processing rulebooks (Commands, Tone, Tech, Numbers, Names, Typography, etc.). |
 | `src-tauri/src/gpu_monitor.rs` | Hardware Telemetry | DXGI video adapter telemetry, VRAM usage tracking, idle eviction state, and Windows power detection. |
 | `src-tauri/Cargo.toml` | Dependencies | Cargo manifest declaring native dependencies (`tauri`, `ort`, `llama-cpp-2`, `cpal`, `windows`, `serde`). |
 | `src-tauri/tauri.conf.json` | Tauri Configuration | Window definitions (`main` and `capsule`), bundle identifiers, and security boundaries. |
 | `src-tauri/capabilities/default.json` | Security Capabilities | Tauri v2 security ACL defining allowed commands for frontend windows. |
 | `src-tauri/.cargo/config.toml` | Compiler Flags | MSVC compiler flags (`/FS`), CMake generator (`Ninja`) for compiling llama.cpp bindings, and the Cargo `target-dir`. |
-| `src-tauri/models/` | Neural Models | Offline model weights: Whisper ONNX (`whisper/encoder_model_int8.onnx`, `decoder_model_merged_int8.onnx`, `tokenizer.json`) and the Qwen 2.5 3B GGUF. |
+| `src-tauri/models/` | Neural Models | Offline model weights: Voxtral Mini 3B (`voxtral-ivy/Voxtral-Mini-3B-2507-Q4_K_M.gguf`, `mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf`, `ivy-lora.gguf`) and fallback Whisper ONNX (`whisper/`). |
 | `src-tauri/installer/` | Packaging Scripts | NSIS installer script (`wrapper.nsi`) and hook definitions (`hooks.nsh`) for single-executable distribution. |
 | `src-tauri/icons/` | Application Icons | Windows `.ico`, macOS `.icns`, Android/iOS mipmaps, and PNG icons. |
 | `src-tauri/tests/fixtures/` | Test Samples | Audio test samples (`sample.wav`, `real_speech_sample.wav`) and fixture generation script (`generate_sample.ps1`). |
@@ -114,8 +117,8 @@ The backend resides in `src-tauri/` and executes all OS integrations, audio capt
 | `package.json` | Project scripts (`npm run tauri dev`, `npm run build`, `npm run setup-models`, `npm run package-installer`) and dependencies. |
 | `vite.config.ts` | Multi-page Vite configuration bundling both `index.html` (Main UI) and `capsule.html` (Overlay UI). |
 | `tsconfig.json` | TypeScript compiler options. |
-| `scripts/download-models.mjs` | Node.js script fetching the Whisper ONNX and Qwen 2.5 3B GGUF models from Hugging Face. |
-| `scripts/package-installer.mjs` | Builds the NSIS installer, then wraps it and the Qwen GGUF into one downloadable exe. |
+| `scripts/download-models.mjs` | Node.js script fetching Voxtral Mini 3B GGUF and fallback Whisper ONNX models from Hugging Face. |
+| `scripts/package-installer.mjs` | Packaging script for single-file installer distribution. |
 | `scripts/generate-checksums.ps1` | PowerShell script generating release file SHA-256 verification hashes. |
 | `.github/workflows/` | GitHub Actions CI/CD workflows for CodeQL static analysis, secret scanning, dependency reviews, and automated builds. |
 | `SECURITY.md` | Threat model, memory zeroization documentation, and vulnerability reporting guidelines. |
@@ -141,8 +144,8 @@ The frontend calls these commands via `@tauri-apps/api/core`:
 | `clear_all_history` | None | `Result<(), String>` | Clears all stored transcripts and audio files. |
 | `get_user_stats` | None | `UserStats` | Loads anonymized productivity stats (`stats.json`). |
 | `retry_transcription` | `id: String` | `Result<RetryResult, String>` | Re-runs STT and cleanup on a previous audio session. |
-| `summarize_transcript` | `id: String` | `Result<String, String>` | Generates an AI summary via local Qwen 2.5 3B. |
-| `touch_up_transcript` | `id: String` | `Result<String, String>` | Runs AI proofread & style cleanup via local Qwen 2.5. |
+| `summarize_transcript` | `id: String` | `Result<String, String>` | Generates an AI summary via local Voxtral Mini 3B. |
+| `touch_up_transcript` | `id: String` | `Result<String, String>` | Runs AI proofread & style cleanup via local Voxtral Mini 3B. |
 | `extract_audio` | `id: String` | `Result<String, String>` | Exports session audio to user's Downloads directory. |
 | `repaste_transcript` | `text: String` | `Result<bool, String>` | Injects transcript text into target window via simulated paste. |
 | `get_active_context` | None | `ActiveContext` | Detects currently focused foreground application window. |
@@ -159,7 +162,7 @@ The frontend calls these commands via `@tauri-apps/api/core`:
 
 ## 4. Security & Privacy Model
 
-1. **Zero Cloud Leakage:** All speech recognition (Whisper ONNX) and AI cleanup/summarization (Qwen 2.5 3B GGUF) run entirely in-process on the local machine.
+1. **Zero Cloud Leakage:** All speech recognition and AI processing (Voxtral Mini 3B multimodal GGUF, fallback Whisper ONNX) run entirely in-process on the local machine.
 2. **Audio RAM Zeroization:** Raw PCM audio sample buffers in memory (`Vec<f32>`) are actively overwritten with zeros (`fill(0.0)`) upon completion or cancellation to prevent residual audio in unallocated memory.
 3. **Daily Auto-Purge:** Audio recordings (`.wav`) and session text transcripts are automatically deleted after 24 hours.
 4. **Strict IPC Validation:** Native Tauri IPC handlers validate all session identifiers to prevent directory traversal attacks.

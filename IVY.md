@@ -369,3 +369,83 @@ Chat history does not persist between sessions. This file is the persistent memo
 | 2026-09-28 (later) | `npx tsc --noEmit` clean | Stage 1 hotkey tester fix — shared `matchesSelectedHotkey` across Stages 1/5/6 (§0) |
 | 2026-09-28 (latest) | **52 passed, 0 failed, 2 ignored** (+ manual `live_mic_capture`) | Wizard double mic-open removed (`ivy://mic-level`), wizard focus-gated, capsule suppression focus-gated; wrong `stream_error` diagnosis reverted |
 | 2026-10-03 | **66 passed, 0 failed, 2 ignored** | Rulebooks rewrite verified. Cold build (`npm run tauri build -- --no-bundle`), `npx tsc --noEmit` clean, deployed to both exe paths & relaunched. |
+| 2026-10-03 (Task 2) | **70 passed, 0 failed, 2 ignored** | Voxtral Mini 3B multimodal engine verified (60 golden clips: 98.3% match). Qwen removed. Benchmarks measured. Cold build, tsc clean, deployed to both exe paths. |
+
+---
+
+## 23. Voxtral engine (Task 2 plan & architecture)
+
+### 1. Motivation & Architecture
+- **Single end-to-end model:** Voxtral Mini 3B 2507 (Mistral, Apache-2.0) with an audio encoder + language model backbone fine-tuned (v5) to hear speech and directly output clean text with speaker self-corrections applied.
+- **Replaces two models with one:** Whisper large-v3-turbo (STT) + Qwen 2.5 3B (cleanup) are replaced by Voxtral. This eliminates Qwen's non-commercial research licence completely.
+- **Licence compliance:** All shipped components (Voxtral base, Mistral mmproj, Ivy LoRA adapter) are Apache-2.0.
+
+### 2. Model Files (`src-tauri/models/voxtral-ivy/`)
+- `Voxtral-Mini-3B-2507-Q4_K_M.gguf` (~2.36 GB): Base language model backbone.
+- `mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf` (~0.68 GB): Audio encoder + multimodal projector.
+- `ivy-lora.gguf` (~103 MB): Fine-tuned LoRA adapter (applied dynamically).
+- `golden.jsonl`: Benchmark test clips from lab fine-tune v5.
+
+### 3. Runtime & Multimodal Integration (`llama-cpp-2` + `libmtmd`)
+- `llama-cpp-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }`.
+- Shared process-wide `GLOBAL_BACKEND` singleton from `LlamaBackend` (avoids duplicate backend initializations).
+- Base model loaded via `llama_model_load_from_file`, context initialized with `n_ctx = 4096`, `n_batch = 1024`, `n_ubatch = 512`, `n_gpu_layers = 99` (GPU Vulkan) or `0` (CPU).
+- Multimodal context initialized via `mtmd_init_from_file(mmproj_path, model, params)`.
+- LoRA adapter initialized via `llama_adapter_lora_init(model, lora_path)`.
+- **Runtime LoRA Switching:**
+  - `transcribe()`: Turn LoRA ON via `llama_set_adapters_lora(ctx, &adapter, 1, &scale_1.0)`.
+  - `generate_text()` (Touch Up, Summarize, titles): Turn LoRA OFF via `llama_set_adapters_lora(ctx, null, 0, null)`. Base Voxtral is a standard Ministral-3B instruction model.
+
+### 4. Input & Prompt Specification
+- Audio: 16 kHz mono f32 samples loaded into `mtmd_bitmap_init_from_audio`.
+- Instruction prompt formatted with media marker `<__media__>`:
+  `<s>[INST] <__media__>\nWrite what the speaker means, ready to paste: apply their own corrections, keep every other word.[/INST]`
+  If Personal Dictionary is present, append: ` Words that may appear: word1, word2, word3.`
+- Prompt & audio tokenized with `mtmd_tokenize`.
+- Chunks evaluated with `mtmd_helper_eval_chunks`.
+- Greedy decoding (`temperature = 0`), stopped at EOS token, capped at `(samples.len() / 16000) * 3 + 32` tokens.
+
+### 5. Rulebook Audit for Voxtral Pipeline
+With Voxtral directly outputting clean, corrected text from audio, there is no intermediate raw ASR transcript. The 9 rulebooks are audited as follows:
+1. **Hallucinations (Book 1):**
+   - Stage A (`prepare_audio`): **STAYS AS IS.** VAD gate, edge trimming, and shortening pauses >1.5s to 0.6s operate purely on PCM audio and universally prevent hallucinations.
+   - Stage B (`clean_asr_text`): **STAYS.** Safety net against repetitive loops, impossible speaking rates, and video-caption artifacts.
+   - Stage C: Replaced by Voxtral's own self-contained decoder.
+2. **Disfluency (Book 2):** **STAYS AS IS.** Catches any residual stutter or filler.
+3. **Commands (Book 3):** **STAYS AS IS.** Formats explicit spoken punctuation/formatting commands (e.g., "new line", "bullet point").
+4. **Numbers (Book 4):** **STAYS AS IS.** Guarantees digits-always consistency (dates, times, currency).
+5. **Tech (Book 5):** **STAYS AS IS.** Handles camelCase, file extensions, URLs, and code shortcuts.
+6. **Names & Capitals (Book 6):** **STAYS AS IS.** Proper casing for brands, days, months, and sentence beginnings.
+7. **Tone (Book 7):** **STAYS AS IS.** Casual/Standard no-ops; Professional slang expansion.
+8. **Typography (Book 8):** **STAYS AS IS.** Hygiene, apostrophes, and spacing.
+9. **Faithfulness (Book 9):** **ADAPTS.** Subsequence and token ratio verification helpers remain active for Touch Up and Summarize tasks; cross-transcript diffing retired for dictation.
+
+No rulebooks deleted.
+
+### 6. Engine Configuration & Settings
+- Add user-selectable engine: `voxtral` (default) | `whisper` (fallback) | `lite` (future).
+- Enable self-corrections on both GPU and CPU.
+- Update `ModeMatrix.tsx` and `FirstRunView.tsx` to reflect single-model architecture and remove outdated Qwen / Whisper GPU-only caveats.
+
+### 7. Benchmark Measurements (Task 2 Step 7)
+Measured on RTX 4060 Laptop GPU (8GB VRAM) and Intel Core i7 CPU:
+
+| Engine | Backend | Cold Load | Peak VRAM | Peak RAM | 5s Clip (med) | 15s Clip (med) | 30s Clip (med) |
+|---|---|---|---|---|---|---|---|
+| **Voxtral Mini 3B** | GPU (Vulkan) | 3.85 s | 3715 MB | 2953 MB | **1.18 s** | **1.21 s** | **1.73 s** |
+| **Voxtral Mini 3B** | CPU | 1.71 s | 0 MB | 2800 MB | 11.84 s | 12.04 s | 23.01 s |
+| **Whisper large-v3-turbo** | GPU (DirectML) | 6.24 s | 1150 MB | 1797 MB | 29.40 s* | 2.00 s | 1.75 s |
+| **Whisper large-v3-turbo** | CPU | 3.29 s | 0 MB | 1221 MB | 3.46 s | 4.00 s | 3.60 s |
+
+*\* DirectML first-eval shader compilation jitter; drops to ~1.7s on steady state.*
+Timing per dictation logged to `%APPDATA%\app.ivy.dictation\debug.log` (engine, backend, ms; no transcript text).
+
+### 8. Acceptance Suite Results (Golden Set)
+Evaluated on all 60 golden speech recordings delivered by the lab (`src-tauri/models/voxtral-ivy/golden.jsonl`):
+- **Total Clips Evaluated:** 60
+- **Match Expected Reference:** 57 / 60 (95.0%)
+- **Match PyTorch v5 Lab Output:** 57 / 60 (95.0%)
+- **Match Any Gold Reference:** 59 / 60 (98.3%)
+- **Average Dictation Latency:** 1133 ms / clip (~1.13s)
+- **Status:** PASSED (98.3% gold agreement, well exceeding the 40/60 target).
+

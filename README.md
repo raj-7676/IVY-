@@ -8,8 +8,8 @@ network call, ever. Speech-to-text and cleanup both run on your own
 machine.
 
 - **Hotkey:** hold `Alt + Space` (customizable in Settings), speak, release.
-- **Speech-to-text:** OpenAI's Whisper large-v3-turbo (int8 ONNX), running locally via ONNX Runtime (DirectML GPU acceleration with automatic CPU fallback).
-- **Cleanup:** 50+ instant deterministic rules across Casual, Standard, and Professional tones (stutters, spoken grammar, code/math/dates/URLs/currency formatting). In Accuracy mode on a GPU, a local Qwen 2.5 3B model also reads every dictation to resolve corrections like "scratch that" — behind a guard that falls back to the rules if it ever adds or drops words. Qwen also powers on-demand Touch Up and History Summarization on GPU and CPU.
+- **Multimodal Engine:** Voxtral Mini 3B 2507 (Apache-2.0, via `llama-cpp-2` with Vulkan GPU acceleration and CPU fallback), fine-tuned with an Ivy LoRA adapter to transcribe speech directly into cleaned text with self-corrections resolved in a single step.
+- **Cleanup & Formatting:** 9 deterministic rulebooks across Casual, Standard, and Professional tones (spoken commands, digits, tech terms, typography, personal dictionary). Voxtral also powers on-demand Touch Up and History Summarization (with LoRA dynamically disabled) on GPU and CPU. Whisper large-v3-turbo (int8 ONNX) remains available as a fallback engine.
 - **History & Privacy:** every dictation and its audio are kept strictly locally and automatically purged after 24 hours (daily retention). Sensitive voice audio and chat history can also be manually purged at any time.
 - **Progress Without Compromise:** user productivity metrics (day streaks, words dictated, words per minute, and the 14-day activity chart) are decoupled from sensitive transcripts and stored as anonymous scalar aggregates (`stats.json`). Clearing your chat or voice history never wipes your streak or sets your stats back to zero.
 - **Network:** none. The packaged app makes zero network calls at runtime — models are bundled at build/install time, not fetched on launch.
@@ -17,7 +17,7 @@ machine.
 ## Security & Privacy
 
 IVY is engineered under a zero-trust, zero-cloud architecture:
-- **Zero Cloud Leakage:** All speech recognition (Whisper ONNX) and AI cleanup/summarization (Qwen 2.5 3B GGUF) run entirely in-process on your local CPU/GPU.
+- **Zero Cloud Leakage:** All speech recognition and AI processing (Voxtral Mini 3B multimodal GGUF, or Whisper ONNX fallback) run entirely in-process on your local CPU/GPU.
 - **Audio RAM Zeroization:** Raw PCM audio sample buffers in memory (`Vec<f32>`) are actively overwritten with zeros (`fill(0.0)`) upon completion or cancellation to prevent residual audio in unallocated memory.
 - **Daily Auto-Purge:** Audio recordings (`.wav`) and session text transcripts are automatically deleted after 24 hours.
 - **Strict IPC Validation:** Native Tauri IPC handlers validate all session identifiers to prevent directory traversal attacks.

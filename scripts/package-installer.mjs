@@ -23,7 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const gguf = path.join(root, 'src-tauri', 'models', 'qwen2.5-3b', 'qwen2.5-3b-instruct-q4_k_m.gguf');
+const gguf = path.join(root, 'src-tauri', 'models', 'voxtral-ivy', 'Voxtral-Mini-3B-2507-Q4_K_M.gguf');
 // Ask cargo where it really builds: src-tauri/.cargo/config.toml can move
 // target-dir, and a hardcoded src-tauri/target path silently found nothing.
 const { target_directory } = JSON.parse(

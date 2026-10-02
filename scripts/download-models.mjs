@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 // One-time model acquisition for local dev/build — never run by the shipped
 // app itself (see IVY.md: "Network | none, ever"). Downloads real Whisper
-// large-v3-turbo (STT, int8 ONNX) and Qwen 2.5 3B (cleanup & summarization)
-// weights into src-tauri/models/, which tauri.conf.json bundles into the
-// installer as a resource directory so the packaged app makes zero network
-// calls at runtime.
+// Voxtral Mini 3B 2507 (end-to-end multimodal STT + cleanup) and Whisper
+// large-v3-turbo (fallback STT) weights into src-tauri/models/, which
+// tauri.conf.json bundles into the installer as a resource directory so the
+// packaged app makes zero network calls at runtime.
 //
-// Whisper large-v3-turbo replaces Moonshine v2 base as of 2026-09-24 —
-// multilingual (99 languages, including Hindi for Indian-English loanwords),
-// real lower WER on published benchmarks. int8 quantized encoder+decoder
-// (~1.08GB total) chosen for CPU speed; see IVY.md for the real benchmark
-// sources this decision was made from.
+// Whisper large-v3-turbo is retained as a fallback engine.
 //
-// Qwen 2.5 3B's GGUF (~1.96GB) is downloaded here for real (full Q4_K_M
-// quality). 1.5B was dropped 2026-09-27 (Yash's call: context-understanding
-// quality over install size for this feature).
+// Voxtral Mini 3B 2507 base model (~2.36GB Q4_K_M) + mmproj (~0.68GB Q8_0)
+// are downloaded from ggml-org/Voxtral-Mini-3B-2507-GGUF.
 import { createWriteStream, existsSync, mkdirSync, statSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -38,8 +33,12 @@ const FILES = [
     dest: path.join(modelsDir, 'whisper', 'tokenizer.json'),
   },
   {
-    url: 'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
-    dest: path.join(modelsDir, 'qwen2.5-3b', 'qwen2.5-3b-instruct-q4_k_m.gguf'),
+    url: 'https://huggingface.co/ggml-org/Voxtral-Mini-3B-2507-GGUF/resolve/main/Voxtral-Mini-3B-2507-Q4_K_M.gguf',
+    dest: path.join(modelsDir, 'voxtral-ivy', 'Voxtral-Mini-3B-2507-Q4_K_M.gguf'),
+  },
+  {
+    url: 'https://huggingface.co/ggml-org/Voxtral-Mini-3B-2507-GGUF/resolve/main/mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf',
+    dest: path.join(modelsDir, 'voxtral-ivy', 'mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf'),
   },
 ];
 

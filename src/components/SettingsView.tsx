@@ -492,11 +492,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </Row>
 
+          {/* AI Transcription Engine */}
+          <Row
+            title="Transcription Engine"
+            description="Voxtral Mini 3B (Apache-2.0): Single multimodal model that directly hears speech and rewrites it with self-corrections applied. Whisper large-v3-turbo: Speech-to-text fallback."
+          >
+            <div
+              className="flex items-center p-1 rounded-xl"
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+              }}
+            >
+              <button
+                id="engine-voxtral-btn"
+                type="button"
+                onClick={() => onUpdateSettings({ engine: 'voxtral' })}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  (settings.engine ?? 'voxtral') === 'voxtral'
+                    ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
+                    : 'text-white/50 hover:text-white/85'
+                }`}
+                title="Voxtral Mini 3B: End-to-end multimodal model with self-correction resolution."
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Voxtral (Recommended)</span>
+              </button>
+              <button
+                id="engine-whisper-btn"
+                type="button"
+                onClick={() => onUpdateSettings({ engine: 'whisper' })}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  settings.engine === 'whisper'
+                    ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
+                    : 'text-white/50 hover:text-white/85'
+                }`}
+                title="Whisper large-v3-turbo: Legacy speech-to-text fallback."
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Whisper</span>
+              </button>
+            </div>
+          </Row>
+
           {/* Speed vs Accuracy Preference */}
           {settings.cleanupPass && (
             <Row
               title="Transcription Priority"
-              description="Speed: core rules, no AI, no extra wait. Accuracy: the full 50+ rule set on CPU; on GPU, live Qwen AI plus the formatting rules. All four combinations are spelled out under Hardware Acceleration below."
+              description="Speed: core rules, minimal latency. Accuracy: Voxtral multimodal AI with self-correction resolution and full rulebook formatting."
             >
               <div
                 className="flex items-center p-1 rounded-xl"
@@ -514,7 +557,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
                       : 'text-white/50 hover:text-white/85'
                   }`}
-                  title='Core rules only. No AI, no extra wait, GPU or CPU. Corrections like "scratch that" are pasted as spoken.'
+                  title='Core rules only. Minimal latency, GPU or CPU. Corrections like "scratch that" are pasted as spoken.'
                 >
                   <Zap className="w-3.5 h-3.5" />
                   <span>Speed</span>
@@ -528,7 +571,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
                       : 'text-white/50 hover:text-white/85'
                   }`}
-                  title="CPU: full 50+ rule set, no AI. GPU: live Qwen AI on every dictation plus the formatting rules — handles corrections, adds a little time."
+                  title="Accuracy: Voxtral multimodal AI resolves self-corrections on GPU (~1s) or CPU, with full rulebook formatting."
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Accuracy</span>

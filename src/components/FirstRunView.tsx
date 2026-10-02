@@ -41,7 +41,7 @@ interface FirstRunViewProps {
 }
 
 const TARGET_PHRASE = 'Hi, my name is James.';
-// Only Accuracy + GPU (live Qwen) resolves this; every other mode pastes it as spoken.
+// Voxtral resolves self-corrections in Accuracy mode on both GPU and CPU.
 const CORRECTION_PHRASE = 'Hi, I am James. I want to order French fries. No, no, I want a burger.';
 const ACCENT_RGB = '255, 107, 0';
 const isTauri = typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
@@ -58,7 +58,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
   const [currentStage, setCurrentStage] = useState<OnboardingStage>(1);
   const [completedStages, setCompletedStages] = useState<Set<OnboardingStage>>(new Set());
   const [selectedMode, setSelectedMode] = useState<DictationMode>(dictationMode);
-  const liveAi = selectedMode === 'accuracy' && hardwareMode === 'gpu';
+  const liveAi = selectedMode === 'accuracy';
 
   // Stage 5 (Voice Test) state machine
   const [dictationState, setDictationState] = useState<DictationVisualState>('waiting');
@@ -1370,7 +1370,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                 <p id="stage-4-subtitle" className="text-white/60 text-sm sm:text-base max-w-md mx-auto">
                   {liveAi
                     ? 'Say the whole line, correction and all — the AI drops what you took back.'
-                    : 'Only Accuracy + GPU resolves corrections. Your setup pastes them as spoken — try it and see.'}
+                    : 'Speed mode pastes corrections as spoken — try it and see.'}
                 </p>
               </div>
 
@@ -1429,12 +1429,12 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                   }}
                 >
                   <span className="text-[10.5px] uppercase tracking-wider text-[#FFA133] font-semibold">
-                    {liveAi ? 'No trigger words needed' : `Not active in ${selectedMode === 'speed' ? 'Speed' : 'Accuracy'} + ${hardwareMode.toUpperCase()}`}
+                    {liveAi ? 'No trigger words needed' : 'Not active in Speed mode'}
                   </span>
                   <p className="text-white/55 text-[11px] max-w-sm">
                     {liveAi
-                      ? 'Qwen AI reads the whole line and keeps what you meant. It is AI, so glance at the result.'
-                      : 'Your setup has no AI while you dictate. Switch to Accuracy (Step 3) and GPU (Settings → Hardware) to have corrections resolved.'}
+                      ? 'Voxtral multimodal AI reads the whole line and keeps what you meant. It is AI, so glance at the result.'
+                      : 'Speed mode pastes what you said directly with core rules. Switch to Accuracy mode to have self-corrections resolved.'}
                   </p>
                 </div>
 
@@ -1549,7 +1549,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                               ? 'Ivy caught the correction!'
                               : liveAi
                               ? "Didn't catch it that time"
-                              : 'Pasted as spoken — expected in your setup'}
+                              : 'Pasted as spoken — expected in Speed mode'}
                           </span>
                         </div>
                         {/* The real cleaned transcript — whatever it actually
@@ -1571,7 +1571,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                             ? '"French fries" never made it in — that\'s the retracted half of what you said, gone on its own.'
                             : liveAi
                             ? 'The AI can miss sometimes, or the words may have been misheard. Try saying it again.'
-                            : 'Only Accuracy + GPU resolves corrections. Every other setup keeps exactly what you said.'}
+                            : 'Speed mode keeps exactly what you said. Switch to Accuracy mode to have self-corrections resolved.'}
                         </p>
                       </motion.div>
                       );
@@ -1775,7 +1775,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                       </div>
                     </div>
                     <p className="text-[11.5px] text-white/70 mt-3 leading-relaxed">
-                      On CPU: the full 50+ rule set, no extra wait. On GPU: Qwen AI also reads every dictation and drops what you took back, then the same formatting rules run.
+                      Voice AI hears and applies your self-corrections on GPU and CPU, followed by precision formatting rules.
                     </p>
                   </div>
                   <span className="text-[10px] text-[#FFA133] font-medium mt-3 block">
@@ -2186,7 +2186,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                 <ShieldCheck className="w-5 h-5 text-[#FFA133] shrink-0" />
                 <p className="text-[12px] text-white/75 leading-relaxed">
                   <span className="font-bold text-white">IVY is offline-first by design.</span>{' '}
-                  Your voice recordings are processed locally by Whisper, transcribed on your
+                  Your voice recordings are processed locally, transcribed on your
                   GPU or CPU, and never transmitted anywhere — not even anonymously.
                 </p>
               </div>

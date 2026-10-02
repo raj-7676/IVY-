@@ -86,6 +86,20 @@ pub fn after_ai(cleaned: &str) -> String {
     typography::apply(&t)
 }
 
+/// Formatting after Voxtral end-to-end transcription. Voxtral already removes fillers and applies
+/// self-corrections directly from speech. The rulebooks format commands, tone (if Professional),
+/// numbers (digits always), tech terms, names, and typography.
+pub fn after_voxtral(cleaned: &str, tone: Tone) -> String {
+    let mut t = commands::apply(cleaned);
+    if tone == Tone::Professional {
+        t = tone::apply(&t, tone);
+    }
+    t = numbers::apply(&t);
+    t = tech::apply(&t);
+    t = names::apply(&t);
+    typography::apply(&t)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Shared token helpers. A token is one whitespace-separated piece; its "core" is the token with
 // leading and trailing punctuation removed (inner apostrophes, dots and hyphens stay).

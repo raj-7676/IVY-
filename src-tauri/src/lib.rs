@@ -11,8 +11,9 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod audio;
 mod cleanup;
 mod rulebooks;
-mod stt;
-mod gpu_monitor;
+pub(crate) mod stt;
+pub(crate) mod gpu_monitor;
+pub mod voxtral;
 
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
@@ -232,6 +233,10 @@ fn default_onboarding_completed() -> bool {
     false
 }
 
+fn default_engine() -> String {
+    "voxtral".to_string()
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SettingsConfig {
@@ -265,6 +270,8 @@ struct SettingsConfig {
     dictation_mode: String,
     #[serde(default = "default_onboarding_completed")]
     onboarding_completed: bool,
+    #[serde(default = "default_engine")]
+    engine: String,
 }
 
 impl Default for SettingsConfig {
@@ -311,6 +318,7 @@ impl Default for SettingsConfig {
             manual_paste_hotkey: default_manual_paste_hotkey(),
             dictation_mode: default_dictation_mode(),
             onboarding_completed: default_onboarding_completed(),
+            engine: default_engine(),
         }
     }
 }
@@ -659,7 +667,7 @@ fn debug_log(app: &tauri::AppHandle, line: &str) {
     }
 }
 
-/// Where the real Whisper large-v3-turbo + Qwen 2.5 3B model files live. Bundled into the
+/// Where the real Voxtral Mini 3B + Whisper model files live. Bundled into the
 /// installer as a resource directory (see tauri.conf.json) so the shipped
 /// app makes zero network calls; falls back to the repo-relative `models/`
 /// used by `npm run tauri dev` before a resource dir exists.
@@ -1243,16 +1251,18 @@ fn should_use_gpu(app: &tauri::AppHandle) -> bool {
     settings.hardware_mode == "gpu"
 }
 
-/// Whether Qwen 2.5 3B-backed AI features (Touch Up, History Summarize) are
-/// enabled — checks if the GGUF model exists in the models directory.
+/// Whether Voxtral-backed AI features (Touch Up, History Summarize) are
+/// enabled — checks if the Voxtral models exist in the models directory.
 /// Supported on both GPU and CPU modes.
 fn ai_features_enabled(app: &tauri::AppHandle) -> bool {
     let models = models_dir(app);
-    models.join("qwen2.5-3b").join("qwen2.5-3b-instruct-q4_k_m.gguf").exists()
+    let voxtral = models.join("voxtral-ivy");
+    voxtral.join("Voxtral-Mini-3B-2507-Q4_K_M.gguf").exists()
+        && voxtral.join("mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf").exists()
+        && voxtral.join("ivy-lora.gguf").exists()
 }
 
-/// Runs Whisper, then the optional cleanup pass (`cleanup::clean_transcript`:
-/// rules, or Qwen plus formatting rules in GPU Accuracy) — shared by the
+/// Runs Voxtral (default) or Whisper, then the formatting pass — shared by the
 /// fresh-dictation pipeline and `retry_transcription` so there's one real
 /// implementation of "turn samples into final text", not two that could drift.
 fn transcribe_and_clean(
@@ -1263,12 +1273,12 @@ fn transcribe_and_clean(
     cleanup_pass: bool,
 ) -> String {
     let prefer_gpu = should_use_gpu(app);
-    // AGC toward -12dBFS so soft voices reach Whisper at a usable level (IVY.md §10).
+    // AGC toward -12dBFS so soft voices reach recognizer at a usable level (IVY.md §10).
     let normalized = audio::normalize_audio(samples);
     let stt_samples = if normalized.is_empty() { samples } else { &normalized };
 
     // Hallucinations book, stage A (src/rulebooks/hallucinations.rs): no voice -> no text; trim the
-    // silent edges and shorten long pauses, where Whisper invents "Thank you." and friends.
+    // silent edges and shorten long pauses, where recognizer invents "Thank you." and friends.
     let (voiced_audio, voice) = rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
     if voiced_audio.is_empty() {
         debug_log(app, &format!("no speech detected ({:.2}s voiced of {:.2}s) — nothing transcribed", voice.voiced_secs, voice.total_secs));
@@ -1280,59 +1290,94 @@ fn transcribe_and_clean(
     let dictionary = settings.personal_dictionary;
     let dictation_mode = settings.dictation_mode;
 
-    let t_stt = std::time::Instant::now();
-    let (raw, actual_gpu) = match stt::engine(models, prefer_gpu) {
-        Ok(engine) => match engine.transcribe_with_vocabulary(stt_samples, &dictionary) {
-            Ok(text) => {
-                let backend = if engine.is_gpu { "GPU (DirectML)" } else { "CPU" };
-                let stt_ms = t_stt.elapsed().as_millis();
-                // Never log the transcript itself — an "offline, nothing
-                // leaves this machine, recordings purged after 2 days"
-                // pitch can't also keep a permanent plaintext record of
-                // everything ever said in an un-purged diagnostics file.
-                debug_log(app, &format!("stt ok via {backend} in {stt_ms}ms, {} chars", text.chars().count()));
-                (text, engine.is_gpu)
+    if settings.engine.eq_ignore_ascii_case("whisper") {
+        let t_stt = std::time::Instant::now();
+        let (raw, actual_gpu) = match stt::engine(models, prefer_gpu) {
+            Ok(engine) => match engine.transcribe_with_vocabulary(stt_samples, &dictionary) {
+                Ok(text) => {
+                    let backend = if engine.is_gpu { "GPU (DirectML)" } else { "CPU" };
+                    let stt_ms = t_stt.elapsed().as_millis();
+                    debug_log(app, &format!("stt ok via {backend} in {stt_ms}ms, {} chars", text.chars().count()));
+                    (text, engine.is_gpu)
+                }
+                Err(e) => {
+                    let stt_ms = t_stt.elapsed().as_millis();
+                    debug_log(app, &format!("stt transcribe() failed in {stt_ms}ms: {e}"));
+                    log::error!("Ivy: transcription failed: {e}");
+                    (String::new(), engine.is_gpu)
+                }
+            },
+            Err(e) => {
+                debug_log(app, &format!("stt engine load failed: {e}"));
+                log::error!("Ivy: STT engine unavailable: {e}");
+                (String::new(), false)
+            }
+        };
+
+        // Hallucinations book, stage B: Whisper's known non-speech phrases, loops, impossible speaking rate.
+        let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
+        if raw.is_empty() {
+            return raw;
+        }
+
+        let is_cpu_mode = !prefer_gpu || !actual_gpu;
+        let text = if cleanup_pass {
+            let t_clean = std::time::Instant::now();
+            let cleaned = cleanup::clean_transcript(models, &raw, tone_preset, is_cpu_mode, &dictation_mode);
+            let clean_ms = t_clean.elapsed().as_millis();
+            let via = "rules";
+            let hw = if is_cpu_mode { "cpu" } else { "gpu" };
+            debug_log(app, &format!("cleanup pass completed in {clean_ms}ms via {via} ({hw}, {dictation_mode} mode)"));
+            cleaned
+        } else {
+            raw
+        };
+        apply_personal_dictionary(&text, &dictionary)
+    } else {
+        // Voxtral engine (default): end-to-end multimodal model directly outputting clean text with self-corrections resolved.
+        let t_vox = std::time::Instant::now();
+        let is_cpu_mode = !prefer_gpu;
+        let raw = match voxtral::engine(models, is_cpu_mode) {
+            Ok(engine) => {
+                let timeout = if is_cpu_mode {
+                    std::time::Duration::from_secs(60)
+                } else {
+                    std::time::Duration::from_secs(30)
+                };
+                match engine.transcribe(stt_samples, &dictionary, timeout) {
+                    Ok(text) => {
+                        let backend = if engine.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                        let vox_ms = t_vox.elapsed().as_millis();
+                        debug_log(app, &format!("voxtral ok via {backend} in {vox_ms}ms, {} chars", text.chars().count()));
+                        text
+                    }
+                    Err(e) => {
+                        let vox_ms = t_vox.elapsed().as_millis();
+                        debug_log(app, &format!("voxtral transcribe() failed in {vox_ms}ms: {e}"));
+                        log::error!("Ivy: Voxtral transcription failed: {e}");
+                        String::new()
+                    }
+                }
             }
             Err(e) => {
-                let stt_ms = t_stt.elapsed().as_millis();
-                debug_log(app, &format!("stt transcribe() failed in {stt_ms}ms: {e}"));
-                log::error!("Ivy: transcription failed: {e}");
-                (String::new(), engine.is_gpu)
+                debug_log(app, &format!("voxtral engine load failed: {e}"));
+                log::error!("Ivy: Voxtral engine unavailable: {e}");
+                String::new()
             }
-        },
-        Err(e) => {
-            debug_log(app, &format!("stt engine load failed: {e}"));
-            log::error!("Ivy: STT engine unavailable: {e}");
-            (String::new(), false)
+        };
+
+        // Hallucinations book, stage B: safety net against loops, impossible speaking rate
+        let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
+        if raw.is_empty() {
+            return raw;
         }
-    };
 
-    // Hallucinations book, stage B: Whisper's known non-speech phrases, loops, impossible speaking rate.
-    let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
-    if raw.is_empty() {
-        return raw;
+        // Voxtral resolves disfluencies and self-corrections directly from audio.
+        // Format commands, tone (if Professional), numbers (digits always), tech, names, and typography:
+        let tone = rulebooks::Tone::from_label(tone_preset);
+        let formatted = rulebooks::after_voxtral(&raw, tone);
+        apply_personal_dictionary(&formatted, &dictionary)
     }
-
-    // CPU mode is active if GPU was not preferred (battery, user setting, VRAM evicted)
-    // or if the STT engine fell back to CPU due to missing/unsupported GPU hardware.
-    let is_cpu_mode = !prefer_gpu || !actual_gpu;
-
-    let text = if cleanup_pass {
-        let t_clean = std::time::Instant::now();
-        let cleaned = cleanup::clean_transcript(models, &raw, tone_preset, is_cpu_mode, &dictation_mode);
-        let clean_ms = t_clean.elapsed().as_millis();
-        // Mirrors `clean_transcript`'s `want_llm`; an AI timeout/rejection shows in Ivy.log.
-        let via = if !is_cpu_mode && !dictation_mode.eq_ignore_ascii_case("speed") { "Qwen AI" } else { "rules" };
-        let hw = if is_cpu_mode { "cpu" } else { "gpu" };
-        debug_log(app, &format!("cleanup pass completed in {clean_ms}ms via {via} ({hw}, {dictation_mode} mode)"));
-        cleaned
-    } else {
-        raw
-    };
-    // Independent of the cleanup toggle above and of cleanup's own 0ms
-    // fast-path skip (most short dictations never touch the LLM at all) —
-    // a word the user specifically taught Ivy must never depend on either.
-    apply_personal_dictionary(&text, &dictionary)
 }
 
 fn levenshtein(a: &str, b: &str) -> usize {
@@ -1775,7 +1820,7 @@ fn apply_personal_dictionary(text: &str, dictionary: &[String]) -> String {
 /// Runs on a spawned worker thread (never the shortcut-handler thread, and
 /// never touches the cpal `Recorder` — that's already been stopped and
 /// reduced to plain samples by the caller): saves the real audio, transcribes
-/// it for real (Whisper large-v3-turbo), optionally cleans it up (Qwen 2.5 3B,
+/// it for real (Voxtral Mini 3B or Whisper large-v3-turbo), optionally cleans it up,
 /// tone-aware), then pastes and persists — for every attempt, success or
 /// failure, so a failure is retryable from the saved audio and never just
 /// silently drops what was recorded. The capsule only ever hears the result
@@ -2098,7 +2143,7 @@ fn summarize_transcript(app: tauri::AppHandle, id: String) -> Result<String, Str
         return Err("invalid session id format".into());
     }
     if !ai_features_enabled(&app) {
-        return Err("Summarize AI model not found — run `npm run setup-models` to install Qwen 2.5 3B".into());
+        return Err("Summarize AI model not found — Voxtral Mini 3B is required".into());
     }
     if SUMMARIZING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return Err("a summarization task is already in progress".into());
@@ -2123,7 +2168,7 @@ fn summarize_transcript(app: tauri::AppHandle, id: String) -> Result<String, Str
         return Err("transcript exceeds safe summarization limit (100,000 characters)".into());
     }
     let models = models_dir(&app);
-    let engine = cleanup::engine(&models, !should_use_gpu(&app))?;
+    let engine = voxtral::engine(&models, !should_use_gpu(&app))?;
     let summary = engine.summarize(&raw)?;
 
     let _guard = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -2142,14 +2187,14 @@ fn summarize_transcript(app: tauri::AppHandle, id: String) -> Result<String, Str
 /// to the live pipeline; this is a separate, on-demand round trip that
 /// swaps the just-pasted text for an AI-proofread version of itself —
 /// fixing missing punctuation and stray repeated words, never changing
-/// what the speaker actually said (enforced in `CleanupEngine::touch_up`).
+/// what the speaker actually said (enforced in `VoxtralEngine::touch_up`).
 #[tauri::command]
 fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<String, String> {
     if !is_valid_session_id(&id) {
         return Err("invalid session id format".into());
     }
     if !ai_features_enabled(&app) {
-        return Err("Touch Up AI model not found — run `npm run setup-models` to install Qwen 2.5 3B".into());
+        return Err("Touch Up AI model not found — Voxtral Mini 3B is required".into());
     }
     if TOUCHING_UP.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return Err("a touch up is already in progress".into());
@@ -2188,7 +2233,7 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<String, Stri
     }
 
     let models = models_dir(&app);
-    let engine = cleanup::engine(&models, !should_use_gpu(&app))?;
+    let engine = voxtral::engine(&models, !should_use_gpu(&app))?;
     let corrected = engine.touch_up(&raw, &tone)?;
 
     // Re-check focus now that the (potentially several-second) LLM call
@@ -3329,6 +3374,7 @@ fn get_hardware_status(app: tauri::AppHandle) -> HardwareStatusDto {
 /// silently kept the old (stale) process alive instead.
 #[tauri::command]
 fn apply_hardware_mode() {
+    voxtral::unload_engine();
     stt::unload_engine();
     cleanup::unload_engine();
 }
@@ -3591,44 +3637,33 @@ pub fn run() {
             let settings = load_settings(&app_handle);
             let threshold = settings.vram_eviction_threshold;
             gpu_monitor::start_gpu_monitor(threshold, move || {
+                voxtral::unload_engine();
                 stt::unload_engine();
                 cleanup::unload_engine();
             });
 
-            // Background pre-warm: Load Whisper DirectML into GPU VRAM on startup
-            // so the very first dictation starts instantly without a 2s initialization delay!
+            // Background pre-warm: Load active model into memory/VRAM on startup
+            // so the very first dictation starts instantly without initialization delay.
             let app_handle_warm = app.handle().clone();
             std::thread::spawn(move || {
                 let models = models_dir(&app_handle_warm);
                 let prefer_gpu = should_use_gpu(&app_handle_warm);
+                let settings = load_settings(&app_handle_warm);
                 let t_warm = std::time::Instant::now();
-                if let Ok(eng) = stt::engine(&models, prefer_gpu) {
-                    let backend = if eng.is_gpu { "GPU (DirectML)" } else { "CPU" };
-                    debug_log(&app_handle_warm, &format!("stt engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
-                }
-            });
-
-            // Background pre-warm: load Qwen 2.5 3B (~1.96GB GGUF) on startup,
-            // in whichever mode (GPU/CPU) the user's hardware setting
-            // currently means. `cleanup::clean_transcript` routes the rare
-            // utterance containing a self-correction marker (e.g. "no, no")
-            // through this engine (see its own doc comment) in BOTH modes
-            // now (Accuracy mode always trigger-gates it on CPU, Speed mode
-            // trigger-gates it on GPU) — so paying the load cost once here
-            // (instead of stalling the user's first correction mid-session)
-            // is worth it regardless of mode. Already eviction-safe:
-            // `gpu_monitor::start_gpu_monitor` above already calls
-            // `cleanup::unload_engine()` (not just `stt::unload_engine`)
-            // when VRAM gets tight, and `cleanup::engine()` reloads lazily
-            // the next time a correction marker needs it.
-            let app_handle_warm_cleanup = app.handle().clone();
-            std::thread::spawn(move || {
-                let models = models_dir(&app_handle_warm_cleanup);
-                let is_cpu_mode = !should_use_gpu(&app_handle_warm_cleanup);
-                let t_warm = std::time::Instant::now();
-                match cleanup::engine(&models, is_cpu_mode) {
-                    Ok(_) => debug_log(&app_handle_warm_cleanup, &format!("cleanup engine (Qwen 2.5 3B) pre-warmed in {}ms", t_warm.elapsed().as_millis())),
-                    Err(e) => debug_log(&app_handle_warm_cleanup, &format!("cleanup engine pre-warm failed: {e}")),
+                if settings.engine.eq_ignore_ascii_case("whisper") {
+                    if let Ok(eng) = stt::engine(&models, prefer_gpu) {
+                        let backend = if eng.is_gpu { "GPU (DirectML)" } else { "CPU" };
+                        debug_log(&app_handle_warm, &format!("stt engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
+                    }
+                } else {
+                    let is_cpu = !prefer_gpu;
+                    match voxtral::engine(&models, is_cpu) {
+                        Ok(eng) => {
+                            let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                            debug_log(&app_handle_warm, &format!("voxtral engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
+                        }
+                        Err(e) => debug_log(&app_handle_warm, &format!("voxtral engine pre-warm failed: {e}")),
+                    }
                 }
             });
 

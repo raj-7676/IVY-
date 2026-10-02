@@ -44,7 +44,7 @@ IVY Transcriber enforces the following architectural security invariants:
 
 1. **100% Offline & Air-Gapped Operation:**
    - The application executes zero telemetry, zero analytics, and zero cloud API requests during transcription.
-   - All AI models (Whisper large-v3-turbo ONNX STT and Qwen 2.5 3B GGUF) run 100% locally via DirectML/Vulkan or local CPU inference.
+   - All AI models (Voxtral Mini 3B multimodal GGUF via Vulkan/CPU, and fallback Whisper ONNX via DirectML) run 100% locally.
 
 2. **Daily Sensitive Data Auto-Purge:**
    - Voice recordings (`.wav`) and session transcription records (`history.json`) are automatically purged after 24 hours.

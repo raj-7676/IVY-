@@ -38,8 +38,8 @@ windows = { version = "0.58", features = [
   "Win32_System_Power",
 ] }
 
-# Real STT (Whisper large-v3-turbo ONNX export, multilingual) and real cleanup
-# (Qwen 2.5 3B via llama.cpp) — see src/stt.rs, src/cleanup.rs, src/audio.rs.
+# Real multimodal STT & cleanup (Voxtral Mini 3B via llama.cpp mtmd) and fallback
+# STT (Whisper large-v3-turbo ONNX) — see src/voxtral.rs, src/stt.rs, src/audio.rs.
 ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls", "directml"] }
 ndarray = "0.17"
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
@@ -49,7 +49,8 @@ tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 mel_spec = "0.4.0"
 cpal = "0.18"
 rubato = "0.16"
-llama-cpp-2 = { version = "0.1.156", features = ["vulkan"] }
+llama-cpp-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
+llama-cpp-sys-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
 encoding_rs = "0.8"
 hound = "3"
 dagc = "0.1.1"

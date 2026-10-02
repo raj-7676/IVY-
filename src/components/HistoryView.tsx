@@ -117,7 +117,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
 
   // Real, explicit, opt-in — never runs automatically, and never happens as
   // part of a live dictation (that must stay instant). Runs the actual
-  // Qwen 2.5 3B model against the full transcript; on a real failure this
+  // Voxtral Mini 3B model against the full transcript; on a real failure this
   // shows the real error, never a raw-transcript-relabeled-as-summary fake.
   const handleSummarize = async (session: DictationSession) => {
     setSummarizingId(session.id);
