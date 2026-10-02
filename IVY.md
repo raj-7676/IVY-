@@ -26,14 +26,15 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **Git: nothing is committed.** Never commit or push without asking.
 - **After every change,** build, deploy to both exe locations, and relaunch (§18), so Yash never tests stale code.
 
-**2026-10-02: rulebooks rewrite (Yash asked: clean rulebooks + a separate Hallucinations book, research-backed).**
+**2026-10-02 / 2026-10-03: rulebooks rewrite (Yash asked: clean rulebooks + a separate Hallucinations book, research-backed).**
 - New `src-tauri/src/rulebooks/` (9 books) and RULEBOOKS.md.
 - `cleanup.rs` went from 3,524 to 592 lines.
 - `lib.rs` runs Hallucinations stages A and B around Whisper.
 - `ModeMatrix.tsx` text was updated.
-- The rulebook tests pass standalone (32/32).
-- **NOT yet built or deployed:** the build target dir `ivytgt` is gone, so the full build compiles llama.cpp and Whisper from scratch. That waits until the Voxtral v5 training in IVY_decision_lab finishes (about 22:40), so it doesn't steal CPU or GPU.
-- Then: `npm run tauri build -- --no-bundle`, `cargo test --lib -- --test-threads=1`, `npx tsc --noEmit`, deploy to both exe paths, relaunch.
+- Cold build succeeded: `npm run tauri build -- --no-bundle` produced `C:\Users\YASH\Downloads\ivytgt\release\app.exe`.
+- `npx tsc --noEmit` clean.
+- `cargo test --lib -- --test-threads=1`: **66 passed, 0 failed, 2 ignored**.
+- Deployed to both `C:\Users\YASH\Downloads\Ivy.exe` and `C:\Users\YASH\AppData\Local\Ivy\app.exe`, and relaunched.
 - A backup of the replaced files is in `D:\Dev\CODE\ivy_backup_2026-10-02_before_rulebooks`.
 
 **Where things stand (2026-09-28)**
@@ -367,3 +368,4 @@ Chat history does not persist between sessions. This file is the persistent memo
 | 2026-09-28 | **52 passed, 0 failed, 1 ignored** | Dimension-rule fix (§5), wizard capsule suppression (§5/§0); real GPU + Accuracy retest with the 4 sentences |
 | 2026-09-28 (later) | `npx tsc --noEmit` clean | Stage 1 hotkey tester fix — shared `matchesSelectedHotkey` across Stages 1/5/6 (§0) |
 | 2026-09-28 (latest) | **52 passed, 0 failed, 2 ignored** (+ manual `live_mic_capture`) | Wizard double mic-open removed (`ivy://mic-level`), wizard focus-gated, capsule suppression focus-gated; wrong `stream_error` diagnosis reverted |
+| 2026-10-03 | **66 passed, 0 failed, 2 ignored** | Rulebooks rewrite verified. Cold build (`npm run tauri build -- --no-bundle`), `npx tsc --noEmit` clean, deployed to both exe paths & relaunched. |
