@@ -795,12 +795,15 @@ mod tests {
         }
     }
 
-    /// Regression test for a real bug from the Moonshine era (IVY.md): this
-    /// exact recording (Yash's real voice) used to come back empty because
-    /// greedy decoding picked EOS as its single most likely first token even
-    /// though real words ranked right behind it — fixed by
-    /// `MIN_TOKENS_BEFORE_EOS`. Kept across the model swap since the same
-    /// class of failure is possible with any greedy-decoded model.
+    /// Regression test for a real bug from the Moonshine era (IVY.md): a real
+    /// recording came back empty because greedy decoding picked EOS as its
+    /// single most likely first token even though real words ranked right
+    /// behind it — fixed by `MIN_TOKENS_BEFORE_EOS`. Kept across the model swap
+    /// since the same class of failure is possible with any greedy-decoded model.
+    /// The fixture is a synthetic Kokoro TTS voice (bm_lewis, Apache-2.0), 4 s,
+    /// 16 kHz: "Delete requirements dot R S, we don't need it anymore." The
+    /// original real-voice recording was removed from the repo and its history
+    /// for privacy (2026-10-03).
     #[test]
     fn transcribes_real_recording_that_used_to_fail() {
         let models_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
