@@ -1,0 +1,39 @@
+name: 🐛 Bug Report
+description: Report a reproducible software bug or crash in IVY Transcriber.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > ⚠️ **SECURITY NOTICE:** If you have discovered a potential security vulnerability, please do NOT file a public issue!
+        > Report it privately at [GitHub Security Advisories](https://github.com/raj-7676/IVY-/security/advisories/new) or consult [SECURITY.md](https://github.com/raj-7676/IVY-/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Press hotkey 'Alt + Space'
+        2. Dictate '...'
+        3. Release hotkey
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: System & Environment Information
+      description: OS version, hardware specs, GPU type.
+      value: |
+        - OS: Windows 10 / 11
+        - GPU: NVIDIA / AMD / Intel / CPU
+        - IVY Version: 0.1.0
+    validations:
+      required: true

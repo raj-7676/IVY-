@@ -1,0 +1,24 @@
+# Gitleaks Configuration for IVY Transcriber
+# Prevents accidental commits of API keys, private certificates, tokens, or credentials
+
+title = "IVY Transcriber Gitleaks Config"
+
+[extend]
+# Inherit base rules from standard Gitleaks library
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for benign test fixtures and documentation"
+paths = [
+  '''^\.planning/''',
+  '''^tests/fixtures/''',
+  '''package-lock\.json$''',
+  '''Cargo\.lock$''',
+  '''SECURITY\.md$''',
+  '''IVY\.md$'''
+]
+regexes = [
+  '''example\.com''',
+  '''localhost''',
+  '''127\.0\.0\.1'''
+]

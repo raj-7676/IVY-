@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a Security Vulnerability
+    url: https://github.com/raj-7676/IVY-/security/advisories/new
+    about: Please report security vulnerabilities privately via GitHub Security Advisories, not through public issues.
+  - name: 📖 Read the Security Policy
+    url: https://github.com/raj-7676/IVY-/blob/main/SECURITY.md
+    about: Review our vulnerability disclosure policy, response SLAs, and architectural guarantees.

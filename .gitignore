@@ -1,0 +1,67 @@
+# Node.js & Web build artifacts
+node_modules/
+dist/
+build/
+coverage/
+.npm/
+*.log
+
+# Rust & Tauri build targets
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Final single-file installer — 2.7GB, built by `npm run package-installer`,
+# distributed via GitHub Releases attachments, never committed
+release/
+
+# Security: Signing Keys, Certificates & Credentials (NEVER COMMIT)
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+*.keystore
+*.der
+*.priv
+*.asc
+
+# Local Sensitive Dictation Data & Transcripts (Zero Leakage)
+*.wav
+# Synthesized test fixtures (no real voices) — the STT tests need them.
+!src-tauri/tests/fixtures/*.wav
+audio/
+history.json
+history.json.tmp
+stats.json
+stats.json.tmp
+settings.json
+settings.json.tmp
+
+# Large AI Model Weights (Fetched via setup-models, not tracked in git)
+models/
+*.onnx
+*.onnx_data
+*.gguf
+*.bin
+
+# AI coding tool artifacts (agent frameworks, IDE launch configs) — never
+# part of the shipped product or the open-source publish
+.agent/
+.agents
+.claude/
+
+# Environment & Secrets
+.env*
+
+# OS & Editor Caches
+.DS_Store
+Thumbs.db
+desktop.ini
+*.dmp
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*~

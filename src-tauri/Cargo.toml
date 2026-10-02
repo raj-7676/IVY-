@@ -1,0 +1,55 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.11.3", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-log = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+arboard = "3"
+enigo = "0.2"
+chrono = "0.4"
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Threading",
+  "Win32_System_ProcessStatus",
+  "Win32_Graphics_Dxgi",
+  "Win32_System_Power",
+] }
+
+# Real STT (Whisper large-v3-turbo ONNX export, multilingual) and real cleanup
+# (Qwen 2.5 3B via llama.cpp) — see src/stt.rs, src/cleanup.rs, src/audio.rs.
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls", "directml"] }
+ndarray = "0.17"
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+# Whisper-compatible log-mel spectrogram frontend (real, published crate —
+# matches whisper.cpp/pytorch/librosa reference output; avoids hand-rolling
+# STFT + mel filterbank code).
+mel_spec = "0.4.0"
+cpal = "0.18"
+rubato = "0.16"
+llama-cpp-2 = { version = "0.1.156", features = ["vulkan"] }
+encoding_rs = "0.8"
+hound = "3"
+dagc = "0.1.1"

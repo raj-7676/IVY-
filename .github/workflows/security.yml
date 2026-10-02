@@ -1,0 +1,78 @@
+name: Security Audit & Supply Chain Scan
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # Run weekly security scan on Sundays at midnight UTC
+    - cron: '0 0 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: Frontend Dependency Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Run NPM Security Audit
+        run: |
+          npm audit --audit-level=high
+
+  cargo-audit:
+    name: Rust Crates Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run Cargo Audit
+        working-directory: src-tauri
+        run: |
+          cargo audit
+
+  code-lint-and-check:
+    name: Security Compilation & Warnings Verification
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # tauri-build resolves `frontendDist` (../dist) at compile time and
+      # fails the build if it does not exist, so the web assets must be
+      # built before any cargo command runs.
+      - name: Build Frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run Cargo Check
+        working-directory: src-tauri
+        run: |
+          cargo check --verbose
