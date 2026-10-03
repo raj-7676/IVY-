@@ -9,7 +9,7 @@ changed words the speaker actually said. For example:
 - "I think **so**" → "I think"
 - "Ram" → "RAM"
 
-The speech model (Whisper, the Qwen cleanup AI, or a fine-tuned hear-and-clean model) decides what was **meant**.
+The speech model (Voxtral Mini 3B, fallback Whisper, or a fine-tuned hear-and-clean model) decides what was **meant**.
 The rulebooks do only two jobs:
 - refuse output that is not faithful to what was said;
 - format what was said.

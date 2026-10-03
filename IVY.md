@@ -1,6 +1,6 @@
 # IVY — Offline Voice Transcriber
 
-**Status:** v0.1.0. Real hotkey dictation on Windows. Whisper large-v3-turbo STT, a 50+ rule cleanup engine with 3 tones, and Qwen 2.5 3B for live AI cleanup (GPU + Accuracy), Touch Up and Summarize. Everything runs locally. **Last updated:** 2026-09-28.
+**Status:** v0.1.0. Real hotkey dictation on Windows. Voxtral Mini 3B 2507 + Ivy LoRA multimodal engine (GPU Vulkan / CPU fallback), 9 deterministic formatting rulebooks with 3 tones, Whisper large-v3-turbo fallback engine, Touch Up and Summarize via base Voxtral. Everything runs 100% locally. **Last updated:** 2026-10-03.
 
 A standalone, fully offline, open-source dictation app (MIT, to be published on GitHub). Hold a hotkey, talk, and clean text is pasted into whatever field has focus — the same idea as Wispr Flow, but 100% local and free, with nothing ever leaving the machine.
 
@@ -9,8 +9,8 @@ A standalone, fully offline, open-source dictation app (MIT, to be published on 
 | Lives in | `Downloads/IVY_Transcriber` — standalone repo, no Friday/`jarvis_v2` code or dependency |
 | License | MIT |
 | Stack | Rust + Tauri v2 + React 19/TypeScript. Windows-first; macOS and Linux planned (§19) |
-| Speech to text | Whisper large-v3-turbo, int8 ONNX, via `ort`. DirectML GPU with automatic CPU fallback (§4) |
-| Cleanup | 50+ deterministic rules (§8), plus Qwen 2.5 3B via `llama-cpp-2`/Vulkan in GPU + Accuracy mode (§7) |
+| Speech & cleanup | Voxtral Mini 3B 2507 + `ivy-lora.gguf` multimodal engine (Vulkan GPU / CPU). Fallback: Whisper large-v3-turbo (§4). Lite tier coming (§4) |
+| Formatting | 9 deterministic rulebooks (<1ms) across Casual, Standard, and Professional tones (§8) |
 | Network | None, ever — models ship with the install; zero runtime calls |
 
 ---
@@ -21,42 +21,20 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 **Yash's standing rules**
 - **Nothing may be a gimmick.** No seeded demo data, no invented numbers, no control that only simulates success. Anything visible is a claim about what the app does, including UI copy, installer text and README.
-- **Target the weakest PC, not Yash's RTX 4060 laptop.** Ivy is open source for Windows, macOS and Linux. Never propose a bigger model (7B+) because it "fits on 8GB". Improve quality through prompting, guards and rules first.
+- **Hardware tiers:** Voxtral Mini 3B is the primary engine for GPU and capable CPU. Weak/CPU-only PCs will be served by the upcoming Lite engine (Qwen3-ASR-1.7B, fine-tuned in the lab). Never propose 7B+ models.
 - **Work on the real app,** not previews or mockups.
-- **Git: nothing is committed.** Never commit or push without asking.
+- **Git: commits on a branch are fine (branch `voxtral-engine`).** Never push to origin without asking.
 - **After every change,** build, deploy to both exe locations, and relaunch (§18), so Yash never tests stale code.
 
-**2026-10-02 / 2026-10-03: rulebooks rewrite (Yash asked: clean rulebooks + a separate Hallucinations book, research-backed).**
-- New `src-tauri/src/rulebooks/` (9 books) and RULEBOOKS.md.
-- `cleanup.rs` went from 3,524 to 592 lines.
-- `lib.rs` runs Hallucinations stages A and B around Whisper.
-- `ModeMatrix.tsx` text was updated.
-- Cold build succeeded: `npm run tauri build -- --no-bundle` produced `C:\Users\YASH\Downloads\ivytgt\release\app.exe`.
-- `npx tsc --noEmit` clean.
-- `cargo test --lib -- --test-threads=1`: **66 passed, 0 failed, 2 ignored**.
-- Deployed to both `C:\Users\YASH\Downloads\Ivy.exe` and `C:\Users\YASH\AppData\Local\Ivy\app.exe`, and relaunched.
-- A backup of the replaced files is in `D:\Dev\CODE\ivy_backup_2026-10-02_before_rulebooks`.
-
-**Where things stand (2026-09-28)**
-- STT is Whisper large-v3-turbo. The cleanup LLM is Qwen 2.5 3B only. Moonshine, Phi-4-mini and Qwen 1.5B are all deleted.
-- GPU + Accuracy mode runs the AI stage described in §7. The old deterministic self-correction system (`resolve_self_corrections`, marker lists) was deleted. Only the AI resolves corrections now.
-- `cargo test --lib -- --test-threads=1`: **52 passed, 0 failed, 1 ignored**.
-- The latest exe is deployed to both locations and relaunched.
-- **GPU + Accuracy retest (2026-09-28) with the 4 sentences — 3/4 clean, 1 real bug found and fixed:**
-  - France question: kept as transcribed (Qwen dropped a clause, `check_ai_faithful` guard rejected it, rule pipeline pasted it verbatim — guard worked as designed).
-  - Biryani/lemonade cross-sentence correction: still not resolved by the 3B model, matches the known limit (§20) — expected, not a bug.
-  - "Send it to marketing, scratch that, sales": Qwen resolved it correctly to "Send it to sales."
-  - Samosa/money sentence: found a real formatting bug. `format_ordinals_fractions_dimensions` (`cleanup.rs`, Rule 15) matched "500 by 5pm" as a dimension pair, silently eating the "pm" and producing "500x5" instead of leaving the time alone. Root cause: the dimension rule only checked that token 2's *numeric-stripped core* was numeric, not that the whole non-trailing-punctuation part of the token was numeric — so a token like "5pm" (numeric prefix + letters, no punctuation) slipped through. **Fixed:** the rule now requires everything before the trailing punctuation to be digits, so "5pm"/"5ft"/"5kg" no longer match. Regression check added next to the existing dimension test.
-- **Wizard/capsule fix (2026-09-28):** the floating capsule overlay (a separate always-on-top OS window) was popping up over every onboarding stage, including Stage 5 Voice Test, overlapping the wizard's own recording UI. Added `WIZARD_ACTIVE` (an `AtomicBool` in `lib.rs`) gated inside `bridge_capsule_show` — the single choke point every capsule-show call already routed through — so no call site needed touching. `FirstRunView.tsx` calls the new `set_wizard_active` command on mount/unmount. Stage 5/6 still run real dictations through the real hotkey pipeline; only the visible overlay window is suppressed while the wizard is open.
-- **Stage 5 "instant loading"/silent capture (2026-09-28).** Every wizard capture came back `peak=0.0000`. Findings, each verified:
-  - The mic and cpal are fine: `cargo test --lib live_mic_capture -- --ignored --nocapture` (standalone, outside the app) records real room noise.
-  - cpal's "A buffer underrun or overrun occurred" (`Xrun`) is WASAPI's non-fatal DATA_DISCONTINUITY flag. It fires on good captures too. An earlier fix this session wrongly treated it as the cause and added a "microphone glitched" message; that was reverted. It is now logged as a warning only.
-  - This Realtek mic outputs **pure zeros for the first ~400ms** after a stream opens (standalone: 400ms → peak 0, 700ms → real signal). Any short hold is silence.
-  - In the wizard, the stream opened ~250ms later than standalone, because Stage 5/6 also opened the same mic via WebView2 `getUserMedia` (echo cancellation on) for the visualizer, at the same instant. **Fixed:** the wizard no longer calls `getUserMedia` in the app; Rust emits `ivy://mic-level` (peak of the latest buffer, ~20Hz) from its own recorder and the visualizer uses that.
-  - The wizard stayed mounted on Stage 5 after the window was closed to the tray, so it kept reacting to every Alt+Space everywhere (opening the second mic stream) and `WIZARD_ACTIVE` kept the capsule hidden app-wide. **Fixed:** wizard hotkey handlers require `document.hasFocus()`, its completion handlers ignore dictations it didn't start, and `bridge_capsule_show` suppresses the capsule only when `WIZARD_ACTIVE` **and** the main window is focused.
-- **Stage 1 hotkey tester bug (2026-09-28):** the tactile "press your shortcut" tester in Stage 1 lit up for *any* of Alt/Space/Control/CapsLock, ignoring which of the 3 options (`Alt + Space`, `Caps Lock`, `Ctrl + Space`) was actually selected — picking Caps Lock but pressing plain Alt "worked", picking Ctrl + Space but pressing plain Control "worked". Root cause: Stage 1's checker (`FirstRunView.tsx`) was a separate, looser condition than Stage 5/6's real `triggerMatch`, which already gated correctly on `selectedHotkey`. **Fixed** by making all three stages share one `matchesSelectedHotkey` expression instead of Stage 1 having its own — this can't drift apart again because there's only one check left.
-- **Next:** Yash confirms the capsule stays gone through the whole wizard, that Stage 1 now only lights up for the actually-selected key, and retests Stage 5 — if it fails again, `debug.log`/`Ivy.log` will now say plainly whether it was silence or a stream glitch.
-- **Repo cleanup (2026-09-27):** removed dead code, 4 unused npm packages, unused images and assets, old logs, the stale Sep 23 `release/Ivy_Setup.exe` (it still had Moonshine and 1.5B inside), and the stale `src-tauri/target`. Fixed the installer scripts' 1.5B paths and the stale model names in README, ARCHITECTURE, SECURITY and the privacy page. Nothing is committed.
+**Where things stand (2026-10-03)**
+- **Voxtral Mini 3B 2507 + Ivy LoRA** is Ivy's primary engine: a single multimodal forward pass transcribes audio and directly resolves speaker self-corrections on GPU and CPU.
+- **Vendored `llama-cpp-sys-2` patch:** audio avg-pooling disabled for Voxtral (`IVY PATCH` in `src-tauri/vendor/llama-cpp-sys-2`), giving full acoustic resolution (59/60 golden match). Do not overwrite without re-applying the patch.
+- **Qwen 2.5 3B is completely removed** from the runtime codebase.
+- **Touch Up and Summarize** run on base Voxtral (LoRA dynamically disabled) via `generate_text`.
+- **Formatting rulebooks:** 9 deterministic books in `src-tauri/src/rulebooks/` run post-Voxtral formatting (`after_voxtral`).
+- **Whisper large-v3-turbo** is retained as a switchable fallback engine in Settings.
+- **Test suite:** `cargo test --lib -- --test-threads=1` passes (70 passed, 0 failed, 1 ignored).
+- **Build & Deploy:** `npm run tauri build -- --no-bundle` produces `app.exe`, deployed to `Downloads\Ivy.exe` and `AppData\Local\Ivy\app.exe`.
 
 ---
 
@@ -83,26 +61,23 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 ## 4. Models
 
-**STT: Whisper large-v3-turbo** (onnx-community int8 export)
-- **Files:** `encoder_model_int8.onnx` (~645MB), `decoder_model_merged_int8.onnx` (~438MB) and `tokenizer.json`, in `src-tauri/models/whisper/`.
-- **Why it replaced Moonshine v2 base (2026-09-24):** Moonshine hit an accuracy ceiling on accented speech, and Whisper is multilingual (Hindi loanwords).
-- **Parakeet was rejected:** it is English-only, and its transducer decoder can't use the hotword trie.
-- **Language:** English is forced (`<|en|>`), using the 4-token prefix `SOT, EN, TRANSCRIBE, NOTIMESTAMPS`.
-- **Frontend:** a 128-bin log-mel spectrogram via `mel_spec`'s `BatchLogMelSpectrogram`. Whisper's log10 and global normalization are applied by hand, because the crate's convenience path uses natural log and per-frame normalization.
-- **Encoder:** fixed at 3000 frames (a 30s window). The ONNX export rejects anything shorter ("Got invalid dimensions for input: input_features", tested). Audio longer than 30s is split at low-energy pauses into 20–27s chunks.
-- **Decoder:**
-  - Greedy, using `IoBinding`. Encoder states and the cross-attention KV are bound once per segment, and a `cache_position` input is required.
-  - The Personal Dictionary becomes a `HotwordTrie` that adds a +3.0 logit boost.
-  - EOS is forbidden for the first 3 tokens.
-  - A repeating-cycle guard (period 1–8, **5** repeats) stops hallucination loops. It is 5 rather than 3 so a real "no, no, no" doesn't cut the sentence off.
-  - Output is sanitized: "Thank you for watching." and music/laughter tags are removed.
-- **Whisper cleans up speech on its own:** it adds punctuation, writes numbers as digits ("500", "5 pm"), and sometimes drops repeated words. On Yash's own recordings it kept "No, no," in 2 of 3 takes.
+**Primary Engine: Voxtral Mini 3B 2507 + Ivy LoRA**
+- **Files:** `Voxtral-Mini-3B-2507-Q4_K_M.gguf` (~2.36GB), `mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf` (~0.68GB), `ivy-lora.gguf` (~103MB), and `golden.jsonl`, in `src-tauri/models/voxtral-ivy/`.
+- **Runtime:** `llama-cpp-2` with vendored, patched `llama-cpp-sys-2` (Vulkan GPU offload via `n_gpu_layers = 99` or CPU fallback `0`).
+- **Multimodal Integration:** Audio is fed through `mtmd_bitmap_init_from_audio` into the multimodal projector. A vendored patch in `llama.cpp/tools/mtmd/clip-model.h` (`IVY PATCH`) disables audio average pooling, ensuring full acoustic resolution (375 audio tokens per 30s).
+- **Dynamic LoRA Switching:**
+  - **Dictation (`transcribe`):** LoRA ON at scale 1.0. Directly resolves speaker self-corrections, stutters, and hesitations in a single forward pass.
+  - **Touch Up & Summarization (`generate_text`):** LoRA dynamically turned OFF. Base Voxtral acts as an instruction-following Ministral-3B chat model.
+- **Prompt:** Matches training token for token: `<s>[INST]<__media__>Write what the speaker means, ready to paste: apply their own corrections, keep every other word.[/INST]`. Guarded by `instruction_matches_training_prompt_exactly`.
 
-**Cleanup LLM: Qwen 2.5 3B-Instruct Q4_K_M**
-- **File:** `src-tauri/models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf` (2,104,932,768 bytes).
-- **Runtime:** `llama-cpp-2 = { version = "0.1.156", features = ["vulkan"] }`, used through a process-wide `LlamaBackend` singleton.
-- **GPU offload is verified:** 37/37 layers on the RTX 4060. The engine reloads when the requested CPU/GPU mode differs from the cached one.
-- **3B was chosen over 1.5B by Yash** (context understanding matters most). Bigger models are off the table (§0).
+**Fallback STT: Whisper large-v3-turbo** (onnx-community int8 export)
+- **Files:** `encoder_model_int8.onnx` (~645MB), `decoder_model_merged_int8.onnx` (~438MB) and `tokenizer.json`, in `src-tauri/models/whisper/`.
+- **Role:** Selectable fallback engine in Settings. When selected, outputs raw ASR text, followed by rulebook post-processing (no LLM pass).
+- **Frontend & Decoder:** 128-bin log-mel spectrogram, 30s fixed window, greedy decoding with `IoBinding`, hotword trie dictionary boost (+3.0), repeating-cycle guard.
+
+**Upcoming Lite Engine:**
+- **Model:** Qwen3-ASR-1.7B GGUF fine-tuned by the lab.
+- **Role:** Will serve weak/CPU-only PCs with ~2s dictation latency once delivered. Plug-and-play addition to the engine switch.
 
 ## 5. Known traps (read before touching related code)
 
@@ -128,10 +103,10 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **Rules written for spelled-out numbers miss Whisper's digits.** The currency rule needed a digit path ("500 rupees" → ₹500). "pounds" is excluded because it usually means weight.
 - **The dimension rule (`NUM by NUM`, Rule 15) must reject a second token with trailing letters, not just strip them.** "500 by 5pm" used to match as a dimension and silently eat "pm", producing "500x5". Fixed 2026-09-28: it now requires everything before the token's trailing punctuation to be digits.
 
-**AI stage**
-- **A transcript sent as a bare ChatML user message gets answered** ("What is the capital of France?" → "…is Paris"). Always wrap it as tagged data and verify the output (§7).
-- **A 3B model will quietly drop, swap or add words.** `check_ai_faithful` exists for that reason. Never loosen it to "make the AI look smarter".
-- **A stateful model shared across independent calls can leak state between them.** DeepFilterNet's normalization stats caused progressively hallucinated transcripts, and it was deleted. Any new stateful engine needs a same-input-twice regression test.
+**AI & Multimodal engine**
+- **Voxtral prompt tokens must match training verbatim.** Prompt: `<s>[INST]<__media__>Write what the speaker means, ready to paste: apply their own corrections, keep every other word.[/INST]`. There is no space or newline anywhere. The test `instruction_matches_training_prompt_exactly` guards it.
+- **Voxtral must NOT average-pool audio encoder frames.** Upstream llama.cpp averages pairs of audio frames by default for Voxtral, cutting 375 tokens down to 187 and halving acoustic detail. The vendored patch in `src-tauri/vendor/llama-cpp-sys-2` (`IVY PATCH`) fixes this. Never overwrite vendored files without preserving the patch.
+- **Touch Up and Summarize require verification guards.** Base Voxtral runs with LoRA dynamically turned OFF for text generation. `is_word_subsequence` strictly ensures Touch Up never rewrites or invents words. `contained_ratio` guards Summarize against hallucinated content.
 
 **Rendering, platform and build**
 - **Outset `box-shadow` on a transparent DirectComposition surface renders as a hard rectangle** (Skia premultiplication). Use a solid fill, an inset highlight and a 1px border instead.
@@ -143,45 +118,27 @@ Chat history does not persist between sessions. This file is the persistent memo
   - `System::Int64Op` compares with `=`.
   - NTFS is case-insensitive, so a case-only rename of an output file is the same file.
   - `$PLUGINSDIR` doesn't reliably auto-delete; `RMDir /r` it on every exit path.
-- **`src-tauri/.cargo/config.toml` sets `target-dir`,** so the build lands in `C:\Users\YASH\Downloads\ivytgt`, not `src-tauri/target`. Deploying from the wrong folder shipped a days-old binary once.
+- **Build directory & Windows path limit:** Windows' 260-character limit can bite deeply nested CMake Vulkan shader files in `llama-cpp-sys-2` if the repo clone path is deep. Set `CARGO_TARGET_DIR` (e.g. `C:\Users\YASH\Downloads\ivytgt` on Yash's PC) to a short path to stay well below the 260-character ceiling. Deploying from the wrong folder shipped a days-old binary once — always verify target output timestamp.
 
-## 6. Pipeline & the four modes
+## 6. Pipeline & modes
 
-**Pipeline:** hotkey → `audio.rs` capture (own thread) → 16kHz → AGC → Whisper → `cleanup::clean_transcript` → `paste_text` → history/stats → `ivy://dictation-complete`.
+**Pipeline:** hotkey → `audio.rs` capture (own thread) → 16kHz → AGC (`normalize_audio`) → Hallucinations stage A (`prepare_audio`) → **Voxtral `transcribe`** (or Whisper fallback) → Hallucinations stage B (`clean_asr_text`) → formatting rulebooks (`after_voxtral`) → `apply_personal_dictionary` → `paste_text` → history/stats → `ivy://dictation-complete`.
 
-**What each mode does** (`clean_transcript`, `cleanup.rs`, mirrored word-for-word by `src/components/ModeMatrix.tsx` — change both together):
+**Architecture & Engine Roles:**
+- **Voxtral Mini 3B (Primary Engine):** Operates on both GPU (Vulkan) and CPU. A single multimodal forward pass transcribes audio and directly resolves speaker self-corrections (e.g. "Send it to marketing, scratch that, sales" → "Send it to sales") without requiring an intermediate text pass or second model. Self-corrections work on GPU and CPU.
+- **Whisper large-v3-turbo (Fallback Engine):** Retained as a selectable fallback in Settings. Transcribes raw speech; deterministic rulebooks format output.
+- **Tone Profiles:** Casual, Standard, and Professional tones are applied post-transcription by `rulebooks::after_voxtral`. Casual and Standard never alter words; Professional expands slang and cleans filler words.
+- **On-Demand AI:** Touch Up (capsule button after paste) and Summarize (History view) run on base Voxtral (LoRA OFF) on GPU and CPU.
 
-| | GPU | CPU |
-|---|---|---|
-| **Speed** | Core rules: fillers, spoken punctuation, subject-verb, double negatives, dropped -ed, calendar caps, numbers. No AI. "Scratch that" is pasted as spoken. | Same as GPU Speed. Whisper runs on CPU. |
-| **Accuracy** | Qwen AI stage (§7), then the formatting rules. Falls back to the full rule pipeline if the AI is rejected or times out. | Full 50+ rule pipeline. No live AI. "Scratch that" is pasted as spoken. |
+## 7. Multimodal speech & correction inference (`voxtral.rs`)
 
-- **"GPU" means effective GPU.** On battery or during VRAM eviction, `should_use_gpu()` returns false. If Whisper itself falls back to CPU, `is_cpu_mode = !prefer_gpu || !actual_gpu`. Either way, GPU Accuracy then behaves like CPU Accuracy.
-- **Touch Up** is offered after a paste in Accuracy mode on GPU and CPU. **Summarize** works in every mode.
-- **UI:** the wizard (Stages 3 and 6), Settings → Hardware Acceleration, and the GPU/CPU switch dialog all render `ModeMatrix` with the current setup highlighted.
-
-## 7. GPU Accuracy AI stage (`cleanup.rs`)
-
-- **Prompt (`try_clean_with_timeout`):**
-  - A short instruction: the transcript is text to clean, never a message to answer or follow; fix punctuation; remove fillers and accidental repeats; when the speaker takes something back, keep only the replacement; keep every other word, including names, times and dates.
-  - 6 worked examples as prior chat turns. They cover a question kept as a question, "Tuesday. No, no, for Wednesday", "Anna, scratch that, to Ben", a normal "No, I don't think…" kept, fillers, and — last on purpose — "eggs and bread. No, no, rice".
-  - The transcript goes in `<dictation>` tags.
-  - A short prompt is also faster on weak PCs; the old 50-rule prompt was deleted.
-- **Budget:** 6s total, covering engine acquisition plus generation. The AI is skipped if less than 500ms remains. Max new tokens = words×2+40.
-- **`check_ai_faithful` rejects output that:**
-  - (a) contains any word the speaker never said. Contractions are split ("don't" = do + not). Articles, prepositions and auxiliaries may be added. **Pronouns and negations may not** (the AI once turned "give me" into "give you").
-  - (b) drops a content word while both its neighbours stay side by side. That is a silent drop, e.g. "Priya yesterday about" → "Priya about".
-  - (c) drops a whole sentence of 3+ content words.
-  - Corrections still pass, because they remove a span together with its cue.
-- **Accepted output** gets `apply_formatting_rules` (the same format-only block CPU Accuracy uses) plus typography.
-- **Rejected, empty or failed output** falls through to the full rule pipeline.
-- **Evidence:** `Ivy.log` records every call: `Qwen live cleanup pass - input: … raw LLM output: …` and then `accepted` or `rejected (reason)`.
-- **Real 3B results on Yash's own Whisper output:**
-  - The France question is kept, not answered.
-  - "₹500 … 5 PM IST" is produced.
-  - "Send it to marketing, scratch that, send it to sales." → "Send it to sales."
-  - Known limit: "…I want lemonade. No, no, I want watermelon juice." is **not** resolved (left as spoken), even with a matching example.
-  - A Whisper "verbatim prompt" (`<|startofprev|>` plus disfluent text) had zero effect on real recordings and was removed.
+- **Single Multimodal Pass:** Replaced the two-stage pipeline (Whisper STT + Qwen LLM cleanup) with Voxtral Mini 3B 2507 + Ivy LoRA adapter. Full architectural specification is documented in §23.
+- **Prompt Fidelity:** The prompt must match training verbatim:
+  `<s>[INST]<__media__>Write what the speaker means, ready to paste: apply their own corrections, keep every other word.[/INST]`
+  If personal dictionary words exist, append ` Words that may appear: word1, word2, word3.`.
+- **Decoding:** Greedy decoding (`temperature = 0`) capped at 6 tokens per second of audio + 64. Dictations longer than 120s are split into chunks at natural pauses (`split_long_audio`).
+- **Post-Processing:** Output passes through Hallucinations stage B (`clean_asr_text`) as a safety net against repetitive loops or caption artifacts, then `rulebooks::after_voxtral` for deterministic styling (numbers as digits, capitalization, tech terms, typography).
+- **Faithfulness:** Because Voxtral directly hears acoustic pauses, intonation, and hesitations, it resolves corrections with native speech grounding (34/40 corrections on benchmark set). The old text-diffing faithfulness checker is no longer needed during dictation, though `is_word_subsequence` and `contained_ratio` remain active guards for Touch Up and Summarization.
 
 ## 8. Rulebooks & tones (`src/rulebooks/`, RULEBOOKS.md)
 
@@ -198,11 +155,16 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 ## 9. Touch Up & Summarize
 
-- **Touch Up** (capsule button for 5s after a real paste, Accuracy mode, GPU and CPU):
-  - Qwen may only fix punctuation and remove exact repeats. `is_word_subsequence` rejects any substituted or invented word.
+- Both features run on **base Voxtral Mini 3B** with LoRA dynamically turned OFF (`generate_text` in `voxtral.rs`). Base Voxtral functions as a standard instruction-following Ministral-3B chat model.
+- **Touch Up** (capsule button for 5s after a real paste, GPU and CPU):
+  - Prompts base Voxtral to fix missing punctuation and remove exact repeated words/stutters that survived cleanup.
+  - Strict guard: `is_word_subsequence(&result, raw)` ensures no word is rewritten, rephrased, or added.
   - The swap is `Ctrl+Z`, then a re-paste, after a focus re-check. History is updated, and Alt+B still restores the original clipboard.
-  - Timeouts are 10s on GPU and 15s on CPU. These were tuned for 1.5B and are unverified for 3B on CPU.
-- **Summarize** (History, any mode): bullet points, guarded by `contained_ratio`. Timeouts are 20s GPU and 35s CPU. Real failures show a real error.
+  - Timeouts: 10s on GPU, 15s on CPU.
+- **Summarize** (History, any mode):
+  - Prompts base Voxtral to extract concise bullet points from the dictated transcript.
+  - Guarded by `contained_ratio` (must be ≥ 0.20), preventing hallucinations.
+  - Timeouts: 20s on GPU, 35s on CPU. Real failures show a real error.
 - **History titles** use `heuristic_title` (no AI).
 
 ## 10. Audio capture & gain (`audio.rs`)
@@ -213,19 +175,12 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **Guards:** near-silent input (peak below `SILENCE_PEAK_THRESHOLD`) is discarded as silence. Recordings are capped at `MAX_DICTATION_SECS`.
 - **Mic hot-plug:** the Settings mic list refetches on window focus and when the dropdown opens. The Rust side re-enumerates on every call.
 
-## 11. Performance (measured 2026-09-27, Yash's RTX 4060 laptop)
+## 11. Performance
 
-| Stage | GPU | CPU |
-|---|---|---|
-| Whisper encoder (fixed 30s window) | ~770ms | ~3.3s |
-| Whisper total, 6–13s clip | ~1.0–1.3s | ~3.7–4.2s |
-| Qwen 3B live pass (warm) | ~0.7s | ~2.2s (not used live) |
-| Rules | ~1ms | ~1ms |
-| History save + paste | ~0.1s | ~0.1s |
-
-- **Totals:** GPU Speed is about 1.2s and GPU Accuracy about 1.9s. CPU is about 4s.
-- **CPU cost is almost all Whisper's encoder** chewing a fixed 30s window, even for a 3-second clip. The export can't take less. No artificial delays exist beyond the 60ms pre-paste settle and the ≤300ms focus poll.
-- **Unexplored levers:** a smaller Whisper for CPU mode (faster, less accurate), an fp16 encoder for DirectML (faster on GPU, larger download), or a custom export with a dynamic encoder length. All are Yash's call. On a weak PC, CPU mode will be much slower than 4s.
+For measured timings on Yash's RTX 4060 laptop and CPU fallback across Voxtral Mini 3B and Whisper, see the benchmark table in **§23.7**.
+- **Voxtral GPU (Vulkan):** ~0.60s (5s clip), ~0.65s (15s clip), ~0.95s (30s clip). Peak VRAM ~3.7 GB, RAM ~374 MB. Cold load ~2.65s.
+- **Voxtral CPU:** ~13.0s (5s clip), ~25.3s (30s clip). CPU mode is slow for daily use; the upcoming Lite tier (Qwen3-ASR-1.7B) will address weak/CPU-only machines.
+- **Whisper fallback GPU (DirectML):** ~0.90s–1.14s. Peak VRAM ~1.1 GB.
 
 ## 12. Paste & clipboard (`lib.rs`)
 
@@ -280,37 +235,29 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 ## 17. Installer packaging
 
-- **Single file:** Qwen's ~2GB GGUF plus the Whisper-bearing installer exceed NSIS's 2GB data cap. A 7-Zip SFX was rejected (the modern 7-Zip no longer ships `7zSD.sfx`, and old binaries are an unpatched security risk).
-- **`npm run package-installer`:**
-  1. Asks `cargo metadata` for the real target dir.
-  2. Runs `tauri build`.
-  3. Compiles `src-tauri/installer/wrapper.nsi` (embeds the real installer).
-  4. Appends the GGUF plus a 16-byte footer (magic + little-endian length) to produce `…/release/bundle/nsis/Ivy_Setup.exe`.
-- **At install time:** the wrapper streams the GGUF out next to the real installer and runs it. `hooks.nsh` then:
-  - copies the GGUF to `$INSTDIR\models\qwen2.5-3b\`;
-  - asks GPU or CPU and writes `hardware_preference.txt` (read and deleted once by `load_settings`; silent installs default to GPU);
-  - removes the GGUF on uninstall, and asks before deleting app data.
-- **Not rebuilt or tested since the Whisper + 3B switch.** Rebuild and do a real install before any release.
+> [!WARNING]
+> The current installer pipeline (`src-tauri/installer/*`, `scripts/package-installer.mjs`, `scripts/download-models.mjs`) still embeds old Qwen 2.5 3B logic and footer-append scripts. It is **broken and unusable** until Task 3 replaces it with the new engine recommendation installer (supporting Voxtral ~3.1 GB payload and Lite tier).
 
 ## 18. Build, deploy & debugging
 
 - **Prerequisites:** Rust, Node 18+, MSVC Build Tools, WebView2, CMake + Ninja, LLVM (`winget install LLVM.LLVM`), and the Vulkan SDK (`VULKAN_SDK`).
-- **Cargo config:** `.cargo/config.toml` (repo root and `src-tauri/`) sets `CMAKE_GENERATOR = "Ninja"`, `CL`/`_CL_ = "/FS"`. These must be environment variables so the nested `vulkan-shaders-gen` CMake build inherits them; that was the fix for the MSVC `C1041` PDB race.
+- **Cargo config & Build Directory:** `.cargo/config.toml` (repo root and `src-tauri/`) sets `CMAKE_GENERATOR = "Ninja"`, `CL`/`_CL_ = "/FS"`. These must be environment variables so the nested `vulkan-shaders-gen` CMake build inherits them; that was the fix for the MSVC `C1041` PDB race. Machine-specific `target-dir` is decoupled from repository configs; on Windows machines, `CARGO_TARGET_DIR` can be set locally to a short path (e.g. `C:\Users\YASH\Downloads\ivytgt` on Yash's PC) to avoid `MAX_PATH` collisions.
 - **Build:** `npm run tauri build -- --no-bundle` from the repo root. Never a bare `cargo build` (it skips embedding `dist/`).
 - **Deploy:**
   1. Stop `Ivy.exe`/`app.exe` and wait for them to exit.
-  2. Copy `C:\Users\YASH\Downloads\ivytgt\release\app.exe` to **both** `C:\Users\YASH\Downloads\Ivy.exe` and `C:\Users\YASH\AppData\Local\Ivy\app.exe` (the desktop shortcut target).
+  2. Copy `$CARGO_TARGET_DIR\release\app.exe` (`C:\Users\YASH\Downloads\ivytgt\release\app.exe` on Yash's machine) to **both** `C:\Users\YASH\Downloads\Ivy.exe` and `C:\Users\YASH\AppData\Local\Ivy\app.exe` (the desktop shortcut target).
   3. Relaunch.
 - **Model path:** the dev-installed app has no models folder. `models_dir()` falls back to the compile-time `CARGO_MANIFEST_DIR\models`, so deleting a model under `src-tauri/models` affects the running app immediately.
 - **Logs:**
-  - `%APPDATA%\app.ivy.dictation\debug.log` — per dictation: engine (`stt ok via GPU/CPU in Xms`), `cleanup pass … via Qwen AI|rules (gpu|cpu, mode)`, and `settings saved: hardware=… dictation=…`.
-  - `%LOCALAPPDATA%\app.ivy.dictation\logs\Ivy.log` — Qwen's exact input and output, plus the accept/reject reason.
-  - Read both before guessing. Saved recordings in `audio/` can be replayed through Whisper for apples-to-apples comparisons.
+  - `%APPDATA%\app.ivy.dictation\debug.log` — per dictation: engine (`voxtral ok via GPU/CPU in Xms` or `stt ok via GPU (DirectML)/CPU in Xms`), post-processing timings (`cleanup pass completed in Xms via rules`), and `settings saved: hardware=… dictation=…`.
+  - `%LOCALAPPDATA%\app.ivy.dictation\logs\Ivy.log` — diagnostic logs, model loading, and fallback telemetry.
+  - Read both before guessing. Saved recordings in `audio/` can be replayed through the engine for apples-to-apples comparisons.
 - **Tests:** `cargo test --lib -- --test-threads=1`. Parallel runs load several 3B engines plus Whisper on one GPU and time out ("generation timed out"), which is not a real regression. Model-backed tests skip themselves if the model files are missing. Also run `npx tsc --noEmit` (clean even with `--noUnusedLocals --noUnusedParameters`).
 - **Key files:**
   - `src-tauri/src/lib.rs` — commands, pipeline, hotkeys, paste, settings.
-  - `stt.rs` — Whisper.
-  - `cleanup.rs` — rules, AI stage, Touch Up, Summarize.
+  - `voxtral.rs` — Voxtral Mini 3B multimodal engine, LoRA switching, Touch Up & Summarize text generation.
+  - `stt.rs` — Whisper fallback STT.
+  - `cleanup.rs` — fallback cleanup wrapper.
   - `audio.rs` — capture and AGC.
   - `gpu_monitor.rs` — DXGI load/VRAM eviction and battery.
   - `src/components/*` — views, wizard, capsule UI, `ModeMatrix.tsx`.
@@ -325,21 +272,11 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 ## 20. Open items
 
-- **Retest GPU + Accuracy** with the 4 sentences (biryani, samosa, France, rename) and confirm in `Ivy.log`.
-- **Cross-sentence corrections** ("…lemonade. No, no, I want watermelon juice.") aren't resolved by 3B. Whisper also sometimes deletes the "no, no" itself. There's no fix yet within the weakest-hardware constraint.
-- **CPU speed (~4s here, slower on weak PCs)** comes from the fixed 30s encoder window. The levers are in §11 and need Yash's decision.
-- **`target-dir = "C:/Users/YASH/Downloads/ivytgt"`** is a machine-specific absolute path in a repo meant to be published. It must become portable before release. Test with a clean build first, because the short path may be what keeps the Vulkan shader build under Windows' 260-character path limit.
-- **Touch Up/Summarize timeouts** were tuned for 1.5B, not re-measured for 3B on CPU.
-- **Rebuild and install-test the single-file installer** (§17).
-- **Personal Dictionary for accent mishears** (Priya, vada pav, camel case): the mechanism exists (hotword trie), but Yash hasn't added the words yet.
+- **Touch Up/Summarize quality on base Voxtral not yet checked by Yash.** Need evaluation with real transcripts and user sign-off on output quality.
+- **`target-dir = "C:/Users/YASH/Downloads/ivytgt"`** is a machine-specific absolute path in a repo meant to be published. Decouple it cleanly while maintaining Windows 260-char path limit safety and Yash's deploy flow (§18).
+- **Personal Dictionary for accent mishears** (Priya, vada pav, camel case): mechanism supported in Voxtral prompt (`Words that may appear: ...`), ready for user additions.
 - **Mic start-up clips ~650ms of every dictation** on Yash's Realtek (§5), measured with `live_mic_capture`: `Recorder::start` takes 200–285ms to open the stream, then the driver sends zeros for a steady ~425ms. The device exposes exactly one format (48kHz stereo, 480-frame buffer), so there's no config lever. Likely cause is the driver's audio-enhancement (APO) chain warming up; WASAPI raw mode would bypass it, but cpal can't request it. Remaining option is keeping the stream open while Ivy runs (mic-in-use indicator stays lit). Yash said 400ms is acceptable if it can't be reduced (2026-09-28).
 - **AGC2/VAD** (`sonora-agc2`, Silero VAD) was researched and not attempted. If neural denoising is ever revisited, build a fresh instance per call and add the same-input-twice test.
-- **Jev-style "decision" models, tested 2026-09-28** (offline, scratchpad venv, CPU, never touching Ivy's code). Jev (TypeSafe) is closed and cloud-only, so it's ruled out. The test: cue-gated self-corrections. Code finds a cue ("no, no", "scratch that", "sorry", "I mean", "actually") with a phrase before it. The model picks: keep the earlier phrase, keep the later phrase, or keep both. 13 cases (8 real corrections, 5 lookalikes), each asked in both option orders, 26 questions total. Random guessing scores ~9/26.
-  - **Laya** (Convai, Apache 2.0, ModernBERT): English 7/26 at ~170ms and 2GB RAM; multilingual 9/26 at ~70ms. Useless zero-shot, as its own docs warn (~0.36 zero-shot). It would need fine-tuning on thousands of labelled examples (4–5h on 2×T4).
-  - **Qwen 2.5 3B (already in Ivy), asked as a decision via next-token logits** (one forward pass, no generation): **20/26**, ~1.3s/question on CPU. On GPU, prompt eval alone runs ~100ms. It resolves the biryani/lemonade cross-sentence correction in both orders, which the rewrite prompt can't. Misses: two swapped-order corrections (inconsistent answers, so no action if both orders must agree), and one lookalike it wrongly deletes consistently: "I love the design. No, I mean it, it's really good." Shipping would need both-order agreement, deterministic deletion, and a cue list that excludes emphasis ("I mean it"), plus a bigger test set first.
-  - **Not tested:** OpenJev Verdict 2.0 (151M ModernBERT, claims 77% and better than Laya) and Kev (Qwen2.5-0.5B + 38MB LoRA). Running their GitHub code was blocked by the permission classifier; Yash can allow it.
-  - Test scripts: session scratchpad `laya_test.py`, `pair_test.py`, `qwen_logprob_test.py` (temporary folder; recreate if needed).
-  - **Follow-up in progress (2026-09-28): training our own decision model.** Yash wants a Jev-style non-LLM model added *alongside* Qwen, runnable on any laptop. Work happens in a sandbox so this repo is untouched: full copy at `C:\Users\YASH\Downloads\IVY_Transcriber_lab` (own build dir `ivytgt_lab`, app id `app.ivy.dictation.lab`) and training in `C:\Users\YASH\Downloads\IVY_decision_lab`. First baseline (ModernBERT-base, 1 epoch on the 4060): 34/40 corrections fixed and 1/40 lookalikes wrongly edited on a hand-written held-out test. **Full details, data sources, scripts and next steps are in the lab copy's IVY.md, "Decision-model experiment — progress".**
 
 ## 21. Standing lessons
 

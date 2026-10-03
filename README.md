@@ -32,6 +32,8 @@ IVY is engineered under a zero-trust, zero-cloud architecture:
 - [Node.js](https://nodejs.org/) 18+
 - CMake, Ninja, and LLVM (for `libclang.dll`) on `PATH` — needed to build `llama.cpp` bindings. If you have Visual Studio 2022 Build Tools installed, CMake/Ninja usually already ship under `...\Common7\IDE\CommonExtensions\Microsoft\CMake\`; LLVM can be installed with `winget install LLVM.LLVM`.
 - The [Vulkan SDK](https://vulkan.lunarg.com/) (sets `VULKAN_SDK`) — `llama.cpp` is built with its Vulkan GPU backend.
+- *Windows path length recommendation:* The nested Vulkan shader build in `llama.cpp` generates deeply nested files. If your clone path is deep, you may encounter Windows' 260-character path limit (`MAX_PATH`). To ensure clean builds, point Cargo's build directory to a short path before building:
+  `$env:CARGO_TARGET_DIR = "C:\ivytgt"` (PowerShell) or `set CARGO_TARGET_DIR=C:\ivytgt` (cmd).
 
 ```bash
 npm install

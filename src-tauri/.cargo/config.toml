@@ -1,6 +1,3 @@
-[build]
-target-dir = "C:/Users/YASH/Downloads/ivytgt"
-
 [env]
 CMAKE_GENERATOR = "Ninja"
 _CL_ = "/FS"
