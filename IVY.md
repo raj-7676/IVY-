@@ -272,8 +272,9 @@ For measured timings on Yash's RTX 4060 laptop and CPU fallback across Voxtral M
 
 ## 20. Open items
 
-- **Touch Up/Summarize quality on base Voxtral not yet checked by Yash.** Need evaluation with real transcripts and user sign-off on output quality.
-- **`target-dir = "C:/Users/YASH/Downloads/ivytgt"`** is a machine-specific absolute path in a repo meant to be published. Decouple it cleanly while maintaining Windows 260-char path limit safety and Yash's deploy flow (§18).
+- **Touch Up/Summarize quality on base Voxtral not yet checked by Yash.** Need evaluation with real transcripts and user sign-off on output quality once GPU training completes.
+- **Whisper fallback deprecation:** Keep Whisper large-v3-turbo as a safety net until the Lite brain (Qwen3-ASR-1.7B) is delivered, integrated, and proven in Ivy. Once Lite is proven, drop Whisper to reduce download size by ~1 GB.
+- **Initial release version:** `0.1.0` confirmed for the first public release ("early but real"). Move to `1.0.0` after external usage feedback.
 - **Personal Dictionary for accent mishears** (Priya, vada pav, camel case): mechanism supported in Voxtral prompt (`Words that may appear: ...`), ready for user additions.
 - **Mic start-up clips ~650ms of every dictation** on Yash's Realtek (§5), measured with `live_mic_capture`: `Recorder::start` takes 200–285ms to open the stream, then the driver sends zeros for a steady ~425ms. The device exposes exactly one format (48kHz stereo, 480-frame buffer), so there's no config lever. Likely cause is the driver's audio-enhancement (APO) chain warming up; WASAPI raw mode would bypass it, but cpal can't request it. Remaining option is keeping the stream open while Ivy runs (mic-in-use indicator stays lit). Yash said 400ms is acceptable if it can't be reduced (2026-09-28).
 - **AGC2/VAD** (`sonora-agc2`, Silero VAD) was researched and not attempted. If neural denoising is ever revisited, build a fresh instance per call and add the same-input-twice test.
