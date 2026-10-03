@@ -1339,10 +1339,13 @@ fn transcribe_and_clean(
         let is_cpu_mode = !prefer_gpu;
         let raw = match voxtral::engine(models, is_cpu_mode) {
             Ok(engine) => {
+                // Scales with length: measured ~0.8 s of work per second of audio on CPU (23 s for a
+                // 30 s clip), far less on GPU. A fixed cap cut long CPU dictations short.
+                let audio_secs = stt_samples.len() as u64 / 16_000;
                 let timeout = if is_cpu_mode {
-                    std::time::Duration::from_secs(60)
+                    std::time::Duration::from_secs(60 + audio_secs * 2)
                 } else {
-                    std::time::Duration::from_secs(30)
+                    std::time::Duration::from_secs(30 + audio_secs / 2)
                 };
                 match engine.transcribe(stt_samples, &dictionary, timeout) {
                     Ok(text) => {

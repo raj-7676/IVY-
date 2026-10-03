@@ -54,3 +54,9 @@ llama-cpp-sys-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
 encoding_rs = "0.8"
 hound = "3"
 dagc = "0.1.1"
+
+# Vendored copy of llama-cpp-sys-2 0.1.156 with one fix: llama.cpp avg-pools Voxtral's audio encoder output
+# (187 tokens per 30 s) but the real model does not (375). See "IVY PATCH" in
+# vendor/llama-cpp-sys-2/llama.cpp/tools/mtmd/clip-model.h. Drop this once upstream fixes it.
+[patch.crates-io]
+llama-cpp-sys-2 = { path = "vendor/llama-cpp-sys-2" }

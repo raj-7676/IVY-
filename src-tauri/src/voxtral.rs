@@ -167,22 +167,33 @@ impl VoxtralEngine {
         })
     }
 
-    /// Transcribe 16 kHz mono f32 audio with self-corrections resolved via fine-tuned LoRA.
+    /// Transcribe 16 kHz mono f32 audio with self-corrections resolved via the fine-tuned LoRA.
+    /// Audio longer than `CHUNK_SECS` is cut at the quietest moment near each boundary and the
+    /// pieces are transcribed in order, so a long dictation never overflows the context window.
+    /// Errors (never a silently truncated paste) if the deadline passes; the caller keeps the
+    /// recording for retry.
     pub fn transcribe(
         &self,
         samples_16k_mono: &[f32],
         dictionary: &[String],
         timeout: Duration,
     ) -> Result<String, String> {
-        let t_start = Instant::now();
-        let deadline = t_start + timeout;
+        let deadline = Instant::now() + timeout;
         let _guard = self.inference_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut parts = Vec::new();
+        for chunk in split_long_audio(samples_16k_mono) {
+            let text = self.transcribe_chunk(chunk, dictionary, deadline)?;
+            if !text.is_empty() {
+                parts.push(text);
+            }
+        }
+        Ok(parts.join(" "))
+    }
 
-        if samples_16k_mono.is_empty() {
+    fn transcribe_chunk(&self, samples: &[f32], dictionary: &[String], deadline: Instant) -> Result<String, String> {
+        if samples.is_empty() {
             return Ok(String::new());
         }
-
-        let raw_model: *mut llama_cpp_sys_2::llama_model = unsafe { std::mem::transmute_copy(&self.model) };
         let raw_adapter: *mut llama_cpp_sys_2::llama_adapter_lora = unsafe { std::mem::transmute_copy(&self.lora_adapter) };
 
         // 1. Enable LoRA with scale 1.0
@@ -197,14 +208,14 @@ impl VoxtralEngine {
         clear_kv_cache(self.lctx);
 
         // 2. Create audio bitmap from raw 16kHz f32 samples
-        let bitmap = unsafe {
-            llama_cpp_sys_2::mtmd_bitmap_init_from_audio(samples_16k_mono.len(), samples_16k_mono.as_ptr())
-        };
+        let bitmap = unsafe { llama_cpp_sys_2::mtmd_bitmap_init_from_audio(samples.len(), samples.as_ptr()) };
         if bitmap.is_null() {
             return Err("failed to create audio bitmap from samples".into());
         }
 
-        // 3. Construct prompt matching training verbatim
+        // 3. The exact layout the LoRA was trained on (HF VoxtralProcessor):
+        //    <s>[INST][BEGIN_AUDIO][AUDIO]...[AUDIO]Write what ...[/INST]
+        //    mtmd expands the marker to [BEGIN_AUDIO] + the audio embeddings. No space, no newline.
         let marker = unsafe {
             let m = llama_cpp_sys_2::mtmd_default_marker();
             if m.is_null() {
@@ -213,17 +224,7 @@ impl VoxtralEngine {
                 CStr::from_ptr(m).to_str().unwrap_or("<__media__>")
             }
         };
-
-        let mut instruction = String::from(
-            "Write what the speaker means, ready to paste: apply their own corrections, keep every other word."
-        );
-        if !dictionary.is_empty() {
-            instruction.push_str(" Words that may appear: ");
-            instruction.push_str(&dictionary.join(", "));
-            instruction.push('.');
-        }
-
-        let user_prompt = format!("<s>[INST] {marker}\n{instruction}[/INST]");
+        let user_prompt = format!("<s>[INST]{marker}{}[/INST]", instruction(dictionary));
         let c_prompt = CString::new(user_prompt).map_err(|e| e.to_string())?;
 
         let input_text = llama_cpp_sys_2::mtmd_input_text {
@@ -241,13 +242,7 @@ impl VoxtralEngine {
 
         let mut bitmaps = [bitmap as *const llama_cpp_sys_2::mtmd_bitmap];
         let tok_res = unsafe {
-            llama_cpp_sys_2::mtmd_tokenize(
-                self.mtmd_ctx,
-                chunks,
-                &input_text,
-                bitmaps.as_mut_ptr(),
-                1,
-            )
+            llama_cpp_sys_2::mtmd_tokenize(self.mtmd_ctx, chunks, &input_text, bitmaps.as_mut_ptr(), 1)
         };
         if tok_res != 0 {
             unsafe {
@@ -260,48 +255,44 @@ impl VoxtralEngine {
         // 4. Evaluate multimodal chunks
         let mut new_n_past: llama_cpp_sys_2::llama_pos = 0;
         let eval_res = unsafe {
-            llama_cpp_sys_2::mtmd_helper_eval_chunks(
-                self.mtmd_ctx,
-                self.lctx,
-                chunks,
-                0,
-                0,
-                1024,
-                true,
-                &mut new_n_past,
-            )
+            llama_cpp_sys_2::mtmd_helper_eval_chunks(self.mtmd_ctx, self.lctx, chunks, 0, 0, 1024, true, &mut new_n_past)
         };
-
         unsafe {
             llama_cpp_sys_2::mtmd_bitmap_free(bitmap);
             llama_cpp_sys_2::mtmd_input_chunks_free(chunks);
         }
-
         if eval_res != 0 {
+            clear_kv_cache(self.lctx);
             return Err(format!("mtmd_helper_eval_chunks failed with code {eval_res}"));
         }
 
-        // 5. Greedy decoding until EOS or max_new_tokens
+        // 5. Greedy decoding. Fast speech runs ~4-5 tokens/s, so leave generous headroom.
+        let max_new_tokens = (samples.len() as f32 / 16000.0 * 6.0) as usize + 64;
+        let text = self.greedy_decode(new_n_past, max_new_tokens, deadline);
+        clear_kv_cache(self.lctx);
+        Ok(text?.trim().to_string())
+    }
+
+    /// Greedy decoding from the current KV cache. Collects raw bytes and decodes UTF-8 once at
+    /// the end, so characters split across tokens (₹, é, emoji) survive.
+    fn greedy_decode(&self, mut n_past: llama_cpp_sys_2::llama_pos, max_tokens: usize, deadline: Instant) -> Result<String, String> {
+        let raw_model: *mut llama_cpp_sys_2::llama_model = unsafe { std::mem::transmute_copy(&self.model) };
         let vocab = unsafe { llama_cpp_sys_2::llama_model_get_vocab(raw_model) };
         let n_vocab = unsafe { llama_cpp_sys_2::llama_n_vocab(vocab) };
-        let mut n_past = new_n_past;
-        let max_new_tokens = ((samples_16k_mono.len() as f32 / 16000.0) * 3.0) as usize + 32;
-
-        let mut generated_text = String::new();
+        let mut bytes: Vec<u8> = Vec::new();
         let batch = unsafe { llama_cpp_sys_2::llama_batch_init(1, 0, 1) };
+        let mut result = Ok(());
 
-        for _ in 0..max_new_tokens {
+        for _ in 0..max_tokens {
             if Instant::now() > deadline {
-                log::warn!("Ivy: Voxtral transcription reached deadline");
+                result = Err("Voxtral generation timed out".to_string());
                 break;
             }
-
             let logits = unsafe { llama_cpp_sys_2::llama_get_logits_ith(self.lctx, -1) };
             if logits.is_null() {
                 break;
             }
             let logits_slice = unsafe { std::slice::from_raw_parts(logits, n_vocab as usize) };
-
             let mut best_id = 0;
             let mut best_logit = f32::NEG_INFINITY;
             for (id, &logit) in logits_slice.iter().enumerate() {
@@ -310,26 +301,16 @@ impl VoxtralEngine {
                     best_id = id as i32;
                 }
             }
-
             if unsafe { llama_cpp_sys_2::llama_vocab_is_eog(vocab, best_id) } {
                 break;
             }
 
             let mut piece_buf = [0u8; 128];
             let n_chars = unsafe {
-                llama_cpp_sys_2::llama_token_to_piece(
-                    vocab,
-                    best_id,
-                    piece_buf.as_mut_ptr() as *mut c_char,
-                    piece_buf.len() as i32,
-                    0,
-                    false,
-                )
+                llama_cpp_sys_2::llama_token_to_piece(vocab, best_id, piece_buf.as_mut_ptr() as *mut c_char, piece_buf.len() as i32, 0, false)
             };
             if n_chars > 0 {
-                if let Ok(piece) = std::str::from_utf8(&piece_buf[..n_chars as usize]) {
-                    generated_text.push_str(piece);
-                }
+                bytes.extend_from_slice(&piece_buf[..n_chars as usize]);
             }
 
             unsafe {
@@ -340,31 +321,26 @@ impl VoxtralEngine {
                 *batch.logits.offset(0) = 1;
                 let mut b = batch;
                 b.n_tokens = 1;
-
                 n_past += 1;
                 if llama_cpp_sys_2::llama_decode(self.lctx, b) != 0 {
+                    result = Err("llama_decode failed during generation".to_string());
                     break;
                 }
             }
         }
-
-        unsafe {
-            llama_cpp_sys_2::llama_batch_free(batch);
-        }
-        clear_kv_cache(self.lctx);
-
-        Ok(generated_text.trim().to_string())
+        unsafe { llama_cpp_sys_2::llama_batch_free(batch); }
+        result.map(|_| String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    /// Generate text without LoRA for Touch Up, Summarization, and titles.
+    /// Generate text without LoRA for Touch Up, Summarization, and titles. `prompt` carries its
+    /// own `<s>[INST]...[/INST]`, so the tokenizer must not add a second BOS.
     pub fn generate_text(
         &self,
         prompt: &str,
         max_tokens: usize,
         timeout: Duration,
     ) -> Result<String, String> {
-        let t_start = Instant::now();
-        let deadline = t_start + timeout;
+        let deadline = Instant::now() + timeout;
         let _guard = self.inference_lock.lock().unwrap_or_else(|e| e.into_inner());
 
         let raw_model: *mut llama_cpp_sys_2::llama_model = unsafe { std::mem::transmute_copy(&self.model) };
@@ -375,43 +351,22 @@ impl VoxtralEngine {
         }
         clear_kv_cache(self.lctx);
 
-        // 2. Tokenize prompt
+        // 2. Tokenize prompt (add_special = false: the prompt already starts with a literal <s>)
         let vocab = unsafe { llama_cpp_sys_2::llama_model_get_vocab(raw_model) };
         let c_prompt = CString::new(prompt).map_err(|e| e.to_string())?;
-
-        let mut tokens: Vec<llama_cpp_sys_2::llama_token> = vec![0; prompt.len() + 32];
-        let n_tokens = unsafe {
-            llama_cpp_sys_2::llama_tokenize(
-                vocab,
-                c_prompt.as_ptr(),
-                c_prompt.as_bytes().len() as i32,
-                tokens.as_mut_ptr(),
-                tokens.len() as i32,
-                true,
-                true,
-            )
+        let tokenize = |buf: &mut Vec<llama_cpp_sys_2::llama_token>| unsafe {
+            llama_cpp_sys_2::llama_tokenize(vocab, c_prompt.as_ptr(), c_prompt.as_bytes().len() as i32, buf.as_mut_ptr(), buf.len() as i32, false, true)
         };
+        let mut tokens: Vec<llama_cpp_sys_2::llama_token> = vec![0; prompt.len() + 32];
+        let mut n_tokens = tokenize(&mut tokens);
         if n_tokens < 0 {
             tokens.resize((-n_tokens) as usize, 0);
-            let n_tokens_retry = unsafe {
-                llama_cpp_sys_2::llama_tokenize(
-                    vocab,
-                    c_prompt.as_ptr(),
-                    c_prompt.as_bytes().len() as i32,
-                    tokens.as_mut_ptr(),
-                    tokens.len() as i32,
-                    true,
-                    true,
-                )
-            };
-            if n_tokens_retry < 0 {
+            n_tokens = tokenize(&mut tokens);
+            if n_tokens < 0 {
                 return Err("failed to tokenize text prompt".into());
             }
-            tokens.truncate(n_tokens_retry as usize);
-        } else {
-            tokens.truncate(n_tokens as usize);
         }
-
+        tokens.truncate(n_tokens as usize);
         if tokens.is_empty() {
             return Ok(String::new());
         }
@@ -430,82 +385,17 @@ impl VoxtralEngine {
         }
         let mut pb = prompt_batch;
         pb.n_tokens = tokens.len() as i32;
-
         let decode_res = unsafe { llama_cpp_sys_2::llama_decode(self.lctx, pb) };
         unsafe { llama_cpp_sys_2::llama_batch_free(prompt_batch); }
         if decode_res != 0 {
+            clear_kv_cache(self.lctx);
             return Err(format!("failed to decode text prompt batch: {decode_res}"));
         }
 
-        // 4. Sample generated tokens
-        let n_vocab = unsafe { llama_cpp_sys_2::llama_n_vocab(vocab) };
-        let mut n_past = tokens.len() as llama_cpp_sys_2::llama_pos;
-        let mut generated_text = String::new();
-        let batch = unsafe { llama_cpp_sys_2::llama_batch_init(1, 0, 1) };
-
-        for _ in 0..max_tokens {
-            if Instant::now() > deadline {
-                break;
-            }
-
-            let logits = unsafe { llama_cpp_sys_2::llama_get_logits_ith(self.lctx, -1) };
-            if logits.is_null() {
-                break;
-            }
-            let logits_slice = unsafe { std::slice::from_raw_parts(logits, n_vocab as usize) };
-
-            let mut best_id = 0;
-            let mut best_logit = f32::NEG_INFINITY;
-            for (id, &logit) in logits_slice.iter().enumerate() {
-                if logit > best_logit {
-                    best_logit = logit;
-                    best_id = id as i32;
-                }
-            }
-
-            if unsafe { llama_cpp_sys_2::llama_vocab_is_eog(vocab, best_id) } {
-                break;
-            }
-
-            let mut piece_buf = [0u8; 128];
-            let n_chars = unsafe {
-                llama_cpp_sys_2::llama_token_to_piece(
-                    vocab,
-                    best_id,
-                    piece_buf.as_mut_ptr() as *mut c_char,
-                    piece_buf.len() as i32,
-                    0,
-                    false,
-                )
-            };
-            if n_chars > 0 {
-                if let Ok(piece) = std::str::from_utf8(&piece_buf[..n_chars as usize]) {
-                    generated_text.push_str(piece);
-                }
-            }
-
-            unsafe {
-                *batch.token.offset(0) = best_id;
-                *batch.pos.offset(0) = n_past;
-                *batch.n_seq_id.offset(0) = 1;
-                *(*batch.seq_id.offset(0)).offset(0) = 0;
-                *batch.logits.offset(0) = 1;
-                let mut b = batch;
-                b.n_tokens = 1;
-
-                n_past += 1;
-                if llama_cpp_sys_2::llama_decode(self.lctx, b) != 0 {
-                    break;
-                }
-            }
-        }
-
-        unsafe {
-            llama_cpp_sys_2::llama_batch_free(batch);
-        }
+        // 4. Greedy generation
+        let text = self.greedy_decode(tokens.len() as llama_cpp_sys_2::llama_pos, max_tokens, deadline);
         clear_kv_cache(self.lctx);
-
-        Ok(generated_text)
+        text
     }
 
     /// Summarize dictated recording into bullet points (with LoRA OFF).
@@ -583,10 +473,79 @@ impl VoxtralEngine {
     }
 }
 
+/// The dictation instruction, verbatim from training (lab `train_voxtral.py` PROMPT + context suffix).
+fn instruction(dictionary: &[String]) -> String {
+    let mut s = String::from("Write what the speaker means, ready to paste: apply their own corrections, keep every other word.");
+    if !dictionary.is_empty() {
+        s.push_str(" Words that may appear: ");
+        s.push_str(&dictionary.join(", "));
+        s.push('.');
+    }
+    s
+}
+
+/// Longest piece sent to Voxtral in one pass. 120 s of audio is ~1,500 audio tokens plus up to
+/// ~780 output tokens, well inside the 4,096-token context. Ivy allows dictations up to 500 s.
+const CHUNK_SECS: usize = 120;
+
+/// Splits audio longer than `CHUNK_SECS` into pieces, cutting each at the quietest 100 ms window
+/// in the last 20 s before the limit, so a cut lands in a pause rather than mid-word.
+// ponytail: energy-based cut, not VAD; a correction spoken across a cut is not merged. Fine for
+// dictations under 2 min (almost all); revisit if long-form dictation becomes common.
+fn split_long_audio(samples: &[f32]) -> Vec<&[f32]> {
+    const SR: usize = 16_000;
+    const WIN: usize = SR / 10;
+    let limit = CHUNK_SECS * SR;
+    let mut out = Vec::new();
+    let mut rest = samples;
+    while rest.len() > limit {
+        let search_start = limit - 20 * SR;
+        let mut best = limit;
+        let mut best_energy = f32::INFINITY;
+        let mut i = search_start;
+        while i + WIN <= limit {
+            let e: f32 = rest[i..i + WIN].iter().map(|s| s * s).sum();
+            if e < best_energy {
+                best_energy = e;
+                best = i + WIN / 2;
+            }
+            i += WIN / 2;
+        }
+        out.push(&rest[..best]);
+        rest = &rest[best..];
+    }
+    out.push(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn instruction_matches_training_prompt_exactly() {
+        assert_eq!(
+            instruction(&[]),
+            "Write what the speaker means, ready to paste: apply their own corrections, keep every other word."
+        );
+        assert!(instruction(&["Ivy".into(), "Tauri".into()]).ends_with("other word. Words that may appear: Ivy, Tauri."));
+    }
+
+    #[test]
+    fn long_audio_is_split_at_the_quiet_spot_and_nothing_is_lost() {
+        let sr = 16_000;
+        // 300 s of "speech" with one silent 1 s gap at 110 s and another at 220 s.
+        let mut a = vec![0.5f32; 300 * sr];
+        for s in &mut a[110 * sr..111 * sr] { *s = 0.0; }
+        for s in &mut a[220 * sr..221 * sr] { *s = 0.0; }
+        let parts = split_long_audio(&a);
+        assert_eq!(parts.iter().map(|p| p.len()).sum::<usize>(), a.len());
+        assert!(parts.iter().all(|p| p.len() <= CHUNK_SECS * sr));
+        let first_cut = parts[0].len() as f32 / sr as f32;
+        assert!((110.0..111.0).contains(&first_cut), "cut at {first_cut}s, expected inside the 110-111 s pause");
+        assert_eq!(split_long_audio(&a[..60 * sr]).len(), 1);
+    }
 
     fn read_wav(path: &Path) -> Vec<f32> {
         let mut reader = hound::WavReader::open(path).expect("open wav");
@@ -775,9 +734,9 @@ mod tests {
 
             if is_match_exp { match_expected += 1; }
             if is_match_pyt { match_pytorch += 1; }
-            if is_match_hum || is_match_exp || is_match_pyt { match_human += 1; }
+            if is_match_hum { match_human += 1; }
 
-            let mark = if is_match_exp || is_match_pyt || is_match_hum { "MATCH" } else { "DIFF " };
+            let mark = if is_match_exp { "MATCH" } else { "DIFF " };
             println!(
                 "[#{:02}] {} ({:4}ms) | Voxtral: {:?}\n      Expected: {:?} | PyTorch v5: {:?}",
                 total, mark, elapsed_ms, actual, expected, pytorch_v5
@@ -789,11 +748,12 @@ mod tests {
         println!("TOTAL CLIPS: {}", total);
         println!("MATCH EXPECTED:    {}/{} ({:.1}%)", match_expected, total, (match_expected as f64 / total as f64) * 100.0);
         println!("MATCH PYTORCH V5:  {}/{} ({:.1}%)", match_pytorch, total, (match_pytorch as f64 / total as f64) * 100.0);
-        println!("MATCH ANY GOLD:    {}/{} ({:.1}%)", match_human, total, (match_human as f64 / total as f64) * 100.0);
+        println!("EXACT HUMAN GOLD:  {}/{} ({:.1}%)  (strict; the lab's lenient score is in IVY.md)", match_human, total, (match_human as f64 / total as f64) * 100.0);
         println!("AVERAGE TIME:      {} ms/clip", avg_ms);
         println!("================================================================================");
 
-        assert!(match_human >= 40, "At least 40/60 clips must match gold references");
+        // The Rust engine must reproduce llama.cpp's own reference output (same weights, prompt, greedy).
+        assert!(match_expected >= 57, "Rust engine reproduced only {match_expected}/60 llama-mtmd-cli outputs");
     }
 
     #[test]
@@ -941,8 +901,8 @@ mod tests {
         let cold_load_vox_gpu = t0.elapsed().as_millis();
         let vram_post_load = crate::gpu_monitor::query_gpu_telemetry().used_vram_mb;
         let (_, ram_post_load) = get_mem_mb();
-        let vox_gpu_vram = vram_post_load.saturating_sub(vram_baseline).max(3400); // base + mmproj + KV cache is ~3.4GB
-        let vox_gpu_ram = ram_post_load.saturating_sub(ram_baseline).max(500);
+        let vox_gpu_vram = vram_post_load.saturating_sub(vram_baseline);
+        let vox_gpu_ram = ram_post_load.saturating_sub(ram_baseline);
 
         // Warm up
         let _ = vox_gpu.transcribe(&clip_5s, &[], Duration::from_secs(30));
@@ -1000,7 +960,7 @@ mod tests {
         let vox_cpu = engine(&models_dir, true).expect("load Voxtral CPU");
         let cold_load_vox_cpu = t0.elapsed().as_millis();
         let (_, ram_post_load) = get_mem_mb();
-        let vox_cpu_ram = ram_post_load.saturating_sub(ram_baseline).max(2800);
+        let vox_cpu_ram = ram_post_load.saturating_sub(ram_baseline);
 
         // Warm up
         let _ = vox_cpu.transcribe(&clip_5s, &[], Duration::from_secs(60));
@@ -1061,8 +1021,8 @@ mod tests {
         let cold_load_wh_gpu = t0.elapsed().as_millis();
         let vram_post_load = crate::gpu_monitor::query_gpu_telemetry().used_vram_mb;
         let (_, ram_post_load) = get_mem_mb();
-        let wh_gpu_vram = vram_post_load.saturating_sub(vram_baseline).max(1150);
-        let wh_gpu_ram = ram_post_load.saturating_sub(ram_baseline).max(450);
+        let wh_gpu_vram = vram_post_load.saturating_sub(vram_baseline);
+        let wh_gpu_ram = ram_post_load.saturating_sub(ram_baseline);
 
         // Warm up
         let _ = wh_gpu.transcribe_with_vocabulary(&clip_5s, &[]);
@@ -1120,7 +1080,7 @@ mod tests {
         let wh_cpu = crate::stt::engine(&models_dir, false).expect("load Whisper CPU");
         let cold_load_wh_cpu = t0.elapsed().as_millis();
         let (_, ram_post_load) = get_mem_mb();
-        let wh_cpu_ram = ram_post_load.saturating_sub(ram_baseline).max(1200);
+        let wh_cpu_ram = ram_post_load.saturating_sub(ram_baseline);
 
         // Warm up
         let _ = wh_cpu.transcribe_with_vocabulary(&clip_5s, &[]);

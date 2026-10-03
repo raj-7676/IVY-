@@ -370,6 +370,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 | 2026-09-28 (latest) | **52 passed, 0 failed, 2 ignored** (+ manual `live_mic_capture`) | Wizard double mic-open removed (`ivy://mic-level`), wizard focus-gated, capsule suppression focus-gated; wrong `stream_error` diagnosis reverted |
 | 2026-10-03 | **66 passed, 0 failed, 2 ignored** | Rulebooks rewrite verified. Cold build (`npm run tauri build -- --no-bundle`), `npx tsc --noEmit` clean, deployed to both exe paths & relaunched. |
 | 2026-10-03 (Task 2) | **70 passed, 0 failed, 2 ignored** | Voxtral Mini 3B multimodal engine verified (60 golden clips: 98.3% match). Qwen removed. Benchmarks measured. Cold build, tsc clean, deployed to both exe paths. |
+| 2026-10-03 (Claude fixes) | **70 passed, 0 failed, 1 ignored** | Patched llama.cpp avgpool bug (vendored `llama-cpp-sys-2`), exact training prompt, long-audio split, length-scaled timeout, single BOS, UTF-8 decode, real benchmark numbers. Golden 59/60 vs regenerated `expected`. Release build, tsc clean. |
 
 ---
 
@@ -388,6 +389,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 ### 3. Runtime & Multimodal Integration (`llama-cpp-2` + `libmtmd`)
 - `llama-cpp-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }`.
+- **`llama-cpp-sys-2` is vendored and patched** (`src-tauri/vendor/llama-cpp-sys-2`, wired in through `[patch.crates-io]` in `Cargo.toml`). Upstream llama.cpp lists Voxtral in `audio_has_avgpool()` (`tools/mtmd/clip-model.h`), which averages pairs of audio-encoder frames: 30 s of audio becomes 187 tokens. The real model (HF `VoxtralEncoder`) defines `avg_pooler` but never calls it, so training saw 375 tokens. With the bug, the model got half the audio detail: on the 60 set-2 clips it scored 30/40 corrections and 14/20 normal. Fixed, it scores **34/40 and 19/20** (PyTorch v5: 35/40, 15/20). The patch is marked `IVY PATCH`. Keep it when bumping the crate, until upstream fixes the bug.
 - Shared process-wide `GLOBAL_BACKEND` singleton from `LlamaBackend` (avoids duplicate backend initializations).
 - Base model loaded via `llama_model_load_from_file`, context initialized with `n_ctx = 4096`, `n_batch = 1024`, `n_ubatch = 512`, `n_gpu_layers = 99` (GPU Vulkan) or `0` (CPU).
 - Multimodal context initialized via `mtmd_init_from_file(mmproj_path, model, params)`.
@@ -398,12 +400,13 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 ### 4. Input & Prompt Specification
 - Audio: 16 kHz mono f32 samples loaded into `mtmd_bitmap_init_from_audio`.
-- Instruction prompt formatted with media marker `<__media__>`:
-  `<s>[INST] <__media__>\nWrite what the speaker means, ready to paste: apply their own corrections, keep every other word.[/INST]`
+- Instruction prompt formatted with media marker `<__media__>`, exactly as in training. There is no space or newline anywhere: training tokens are `<s>[INST][BEGIN_AUDIO][AUDIO]x375 Write ...[/INST]`, and the test `instruction_matches_training_prompt_exactly` checks this.
+  `<s>[INST]<__media__>Write what the speaker means, ready to paste: apply their own corrections, keep every other word.[/INST]`
   If Personal Dictionary is present, append: ` Words that may appear: word1, word2, word3.`
 - Prompt & audio tokenized with `mtmd_tokenize`.
 - Chunks evaluated with `mtmd_helper_eval_chunks`.
-- Greedy decoding (`temperature = 0`), stopped at EOS token, capped at `(samples.len() / 16000) * 3 + 32` tokens.
+- Greedy decoding (`temperature = 0`), stopped at the EOS token. Output is capped at 6 tokens per second of audio, plus 64.
+- Dictations longer than 120 s are split (`split_long_audio`) at the quietest 100 ms in the last 20 s of each 120 s window, so n_ctx 4096 never overflows.
 
 ### 5. Rulebook Audit for Voxtral Pipeline
 With Voxtral directly outputting clean, corrected text from audio, there is no intermediate raw ASR transcript. The 9 rulebooks are audited as follows:
@@ -427,25 +430,26 @@ No rulebooks deleted.
 - Enable self-corrections on both GPU and CPU.
 - Update `ModeMatrix.tsx` and `FirstRunView.tsx` to reflect single-model architecture and remove outdated Qwen / Whisper GPU-only caveats.
 
-### 7. Benchmark Measurements (Task 2 Step 7)
-Measured on RTX 4060 Laptop GPU (8GB VRAM) and Intel Core i7 CPU:
+### 7. Benchmark Measurements (re-measured 2026-10-03 with the avgpool fix)
+Measured on an RTX 4060 Laptop GPU (8 GB VRAM) and an Intel Core i7 CPU. The Task 2 table had invented minimum values (code like `.max(3400)`); those clamps are removed, and every number below is a real measurement.
 
 | Engine | Backend | Cold Load | Peak VRAM | Peak RAM | 5s Clip (med) | 15s Clip (med) | 30s Clip (med) |
 |---|---|---|---|---|---|---|---|
-| **Voxtral Mini 3B** | GPU (Vulkan) | 3.85 s | 3715 MB | 2953 MB | **1.18 s** | **1.21 s** | **1.73 s** |
-| **Voxtral Mini 3B** | CPU | 1.71 s | 0 MB | 2800 MB | 11.84 s | 12.04 s | 23.01 s |
-| **Whisper large-v3-turbo** | GPU (DirectML) | 6.24 s | 1150 MB | 1797 MB | 29.40 s* | 2.00 s | 1.75 s |
-| **Whisper large-v3-turbo** | CPU | 3.29 s | 0 MB | 1221 MB | 3.46 s | 4.00 s | 3.60 s |
+| **Voxtral Mini 3B** | GPU (Vulkan) | 2.65 s | 3715 MB | 374 MB | **0.60 s** | **0.65 s** | **0.95 s** |
+| **Voxtral Mini 3B** | CPU | 1.12 s | 0 MB | 843 MB | 13.01 s | 13.28 s | 25.29 s |
+| **Whisper large-v3-turbo** | GPU (DirectML) | 3.52 s | 1114 MB | 527 MB | 0.90 s | 1.14 s | 1.03 s |
+| **Whisper large-v3-turbo** | CPU | 3.18 s | 0 MB | 1070 MB | 2.86 s | 3.41 s | 3.16 s |
 
-*\* DirectML first-eval shader compilation jitter; drops to ~1.7s on steady state.*
+Peak RAM is the process working set. The model files are memory-mapped, so mapped weights may not all be counted. Voxtral on CPU (about 13 s for a 5 s clip) is too slow for daily use; that is what the lite tier is for.
 Timing per dictation logged to `%APPDATA%\app.ivy.dictation\debug.log` (engine, backend, ms; no transcript text).
 
 ### 8. Acceptance Suite Results (Golden Set)
 Evaluated on all 60 golden speech recordings delivered by the lab (`src-tauri/models/voxtral-ivy/golden.jsonl`):
+`expected` was regenerated on 2026-10-03 by the lab's `build_golden_gguf.py`, using the patched llama-mtmd-cli (no avgpool) and the exact training prompt.
 - **Total Clips Evaluated:** 60
-- **Match Expected Reference:** 57 / 60 (95.0%)
-- **Match PyTorch v5 Lab Output:** 57 / 60 (95.0%)
-- **Match Any Gold Reference:** 59 / 60 (98.3%)
-- **Average Dictation Latency:** 1133 ms / clip (~1.13s)
-- **Status:** PASSED (98.3% gold agreement, well exceeding the 40/60 target).
+- **Ivy reproduces `expected`:** 59 / 60 (98.3%). The one miss is the spelling "Tubermeets" vs "Tibermeets"; the test asserts at least 57.
+- **Exact human gold (strict):** 45 / 60 (75.0%)
+- **Lab lenient score:** corrections 34/40, normal 19/20 (PyTorch v5: 35/40, 15/20)
+- **Average Dictation Latency:** 611 ms / clip (GPU)
+- **Status:** PASSED.
 

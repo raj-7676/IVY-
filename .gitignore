@@ -41,6 +41,8 @@ settings.json.tmp
 
 # Large AI Model Weights (Fetched via setup-models, not tracked in git)
 models/
+# ...but llama.cpp source folders named models/ in the vendored crate are code, not weights
+!src-tauri/vendor/**/models/
 *.onnx
 *.onnx_data
 *.gguf
