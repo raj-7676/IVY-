@@ -1,11 +1,15 @@
 version: 2
+# Monthly, one grouped pull request per area (at most 3 a month). Security alerts are separate and stay on.
 updates:
   # Maintain Rust dependencies in src-tauri
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     open-pull-requests-limit: 10
+    groups:
+      rust:
+        patterns: ["*"]
     labels:
       - "dependencies"
       - "security"
@@ -15,8 +19,11 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     open-pull-requests-limit: 10
+    groups:
+      frontend:
+        patterns: ["*"]
     labels:
       - "dependencies"
       - "security"
@@ -27,6 +34,9 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]
     labels:
       - "dependencies"
       - "ci"
