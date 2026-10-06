@@ -51,6 +51,10 @@ jobs:
   code-lint-and-check:
     name: Security Compilation & Warnings Verification
     runs-on: windows-latest
+    env:
+      # llama.cpp's nested CMake object paths pass Windows' 260-character limit under the
+      # default checkout path; a short target dir keeps them under it (README, "Building").
+      CARGO_TARGET_DIR: C:\t
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
