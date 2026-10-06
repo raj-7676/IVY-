@@ -486,13 +486,13 @@ fn instruction(dictionary: &[String]) -> String {
 
 /// Longest piece sent to Voxtral in one pass. 120 s of audio is ~1,500 audio tokens plus up to
 /// ~780 output tokens, well inside the 4,096-token context. Ivy allows dictations up to 500 s.
-const CHUNK_SECS: usize = 120;
+pub const CHUNK_SECS: usize = 120;
 
 /// Splits audio longer than `CHUNK_SECS` into pieces, cutting each at the quietest 100 ms window
 /// in the last 20 s before the limit, so a cut lands in a pause rather than mid-word.
 // ponytail: energy-based cut, not VAD; a correction spoken across a cut is not merged. Fine for
 // dictations under 2 min (almost all); revisit if long-form dictation becomes common.
-fn split_long_audio(samples: &[f32]) -> Vec<&[f32]> {
+pub fn split_long_audio(samples: &[f32]) -> Vec<&[f32]> {
     const SR: usize = 16_000;
     const WIN: usize = SR / 10;
     let limit = CHUNK_SECS * SR;
@@ -939,6 +939,7 @@ mod tests {
             times_30s.push(ms);
         }
         let med_30s = median_ms(times_30s);
+        drop(vox_gpu);
         unload_engine();
 
         results.push(BenchResult {
@@ -997,6 +998,7 @@ mod tests {
             times_30s.push(ms);
         }
         let med_30s = median_ms(times_30s);
+        drop(vox_cpu);
         unload_engine();
 
         results.push(BenchResult {
@@ -1147,5 +1149,61 @@ mod tests {
             );
         }
         println!("============================================================================================\n");
+    }
+
+    #[test]
+    fn test_task6_bug_b_p18_not_truncated() {
+        let p18_path = Path::new(r"C:\Users\YASH\Downloads\IVY_decision_lab\para_test\audio\p18.wav");
+        if !p18_path.exists() {
+            eprintln!("skipping: p18.wav not found");
+            return;
+        }
+        let models_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
+        let eng = engine(&models_dir, false).expect("engine loads");
+        let raw_samples = read_wav(p18_path);
+
+        let dict = vec!["IVY".to_string(), "claude".to_string()];
+
+        // Full live pipeline steps (matching transcribe_and_clean)
+        let normalized = crate::audio::normalize_audio(&raw_samples);
+        let stt_samples = if normalized.is_empty() { &raw_samples } else { &normalized };
+        let (_voiced, voice) = crate::rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
+        assert!(voice.voiced_secs >= 0.25, "speech must be detected");
+
+        let raw = eng.transcribe(stt_samples, &dict, Duration::from_secs(60)).expect("transcribe succeeds");
+        let cleaned = crate::rulebooks::hallucinations::clean_asr_text(&raw, voice);
+        let formatted = crate::rulebooks::after_voxtral(&cleaned, crate::rulebooks::Tone::Standard);
+        let final_text = crate::apply_personal_dictionary(&formatted, &dict);
+        println!("p18 live text:\n{}", final_text);
+        // Regression check: text must not be truncated at "...Don't over.", it must end with the final date
+        assert!(
+            final_text.trim_end().ends_with("18th.") || final_text.trim_end().ends_with("eighteenth."),
+            "Text must end with '18th.' or 'eighteenth.', got: {final_text}"
+        );
+    }
+
+    #[test]
+    fn test_task6_p03_live_text() {
+        let p03_path = Path::new(r"C:\Users\YASH\Downloads\IVY_decision_lab\para_test\audio\p03.wav");
+        if !p03_path.exists() {
+            eprintln!("skipping: p03.wav not found");
+            return;
+        }
+        let models_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
+        let eng = engine(&models_dir, false).expect("engine loads");
+        let raw_samples = read_wav(p03_path);
+
+        let dict = vec!["IVY".to_string(), "claude".to_string()];
+
+        let normalized = crate::audio::normalize_audio(&raw_samples);
+        let stt_samples = if normalized.is_empty() { &raw_samples } else { &normalized };
+        let (_voiced, voice) = crate::rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
+
+        let raw = eng.transcribe(stt_samples, &dict, Duration::from_secs(90)).expect("transcribe succeeds");
+        let cleaned = crate::rulebooks::hallucinations::clean_asr_text(&raw, voice);
+        let formatted = crate::rulebooks::after_voxtral(&cleaned, crate::rulebooks::Tone::Standard);
+        let final_text = crate::apply_personal_dictionary(&formatted, &dict);
+
+        println!("p03 live text:\n{}", final_text);
     }
 }

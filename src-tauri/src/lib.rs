@@ -14,6 +14,7 @@ mod rulebooks;
 pub(crate) mod stt;
 pub(crate) mod gpu_monitor;
 pub mod voxtral;
+pub mod lite;
 
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
@@ -1277,23 +1278,27 @@ fn transcribe_and_clean(
     let normalized = audio::normalize_audio(samples);
     let stt_samples = if normalized.is_empty() { samples } else { &normalized };
 
-    // Hallucinations book, stage A (src/rulebooks/hallucinations.rs): no voice -> no text; trim the
-    // silent edges and shorten long pauses, where recognizer invents "Thank you." and friends.
+    // Hallucinations book, stage A (src/rulebooks/hallucinations.rs): check for speech presence.
+    // Whisper needs trimmed non-speech and shortened pauses (voiced_audio); Voxtral and Lite are
+    // trained on raw continuous speech and handle pauses natively — trimming pauses drops the end of
+    // long dictations across chunk boundaries (Task 6 Bug B).
     let (voiced_audio, voice) = rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
-    if voiced_audio.is_empty() {
+    if voice.voiced_secs < 0.25 {
         debug_log(app, &format!("no speech detected ({:.2}s voiced of {:.2}s) — nothing transcribed", voice.voiced_secs, voice.total_secs));
         return String::new();
     }
-    let stt_samples: &[f32] = &voiced_audio;
 
     let settings = load_settings(app);
     let dictionary = settings.personal_dictionary;
     let dictation_mode = settings.dictation_mode;
 
     if settings.engine.eq_ignore_ascii_case("whisper") {
+        if voiced_audio.is_empty() {
+            return String::new();
+        }
         let t_stt = std::time::Instant::now();
         let (raw, actual_gpu) = match stt::engine(models, prefer_gpu) {
-            Ok(engine) => match engine.transcribe_with_vocabulary(stt_samples, &dictionary) {
+            Ok(engine) => match engine.transcribe_with_vocabulary(&voiced_audio, &dictionary) {
                 Ok(text) => {
                     let backend = if engine.is_gpu { "GPU (DirectML)" } else { "CPU" };
                     let stt_ms = t_stt.elapsed().as_millis();
@@ -1333,6 +1338,49 @@ fn transcribe_and_clean(
             raw
         };
         apply_personal_dictionary(&text, &dictionary)
+    } else if settings.engine.eq_ignore_ascii_case("lite") {
+        // Lite engine (Qwen3-ASR-1.7B, fine-tuned by the lab): fast, lightweight speech model.
+        let t_lite = std::time::Instant::now();
+        let is_cpu_mode = !prefer_gpu;
+        let raw = match lite::engine(models, is_cpu_mode) {
+            Ok(engine) => {
+                let audio_secs = stt_samples.len() as u64 / 16_000;
+                let timeout = if is_cpu_mode {
+                    std::time::Duration::from_secs(60 + audio_secs * 2)
+                } else {
+                    std::time::Duration::from_secs(30 + audio_secs / 2)
+                };
+                match engine.transcribe(stt_samples, &dictionary, timeout) {
+                    Ok(text) => {
+                        let backend = if engine.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                        let lite_ms = t_lite.elapsed().as_millis();
+                        debug_log(app, &format!("lite ok via {backend} in {lite_ms}ms, {} chars", text.chars().count()));
+                        text
+                    }
+                    Err(e) => {
+                        let lite_ms = t_lite.elapsed().as_millis();
+                        debug_log(app, &format!("lite transcribe() failed in {lite_ms}ms: {e}"));
+                        log::error!("Ivy: Lite transcription failed: {e}");
+                        String::new()
+                    }
+                }
+            }
+            Err(e) => {
+                debug_log(app, &format!("lite engine load failed: {e}"));
+                log::error!("Ivy: Lite engine unavailable: {e}");
+                String::new()
+            }
+        };
+
+        // Hallucinations book, stage B: safety net against loops, impossible speaking rate
+        let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
+        if raw.is_empty() {
+            return raw;
+        }
+
+        let tone = rulebooks::Tone::from_label(tone_preset);
+        let formatted = rulebooks::after_voxtral(&raw, tone);
+        apply_personal_dictionary(&formatted, &dictionary)
     } else {
         // Voxtral engine (default): end-to-end multimodal model directly outputting clean text with self-corrections resolved.
         let t_vox = std::time::Instant::now();
@@ -1701,6 +1749,29 @@ fn apply_domain_and_phrase_corrections(text: &str, dictionary: &[String]) -> Str
     result
 }
 
+fn is_common_english_word(lower: &str) -> bool {
+    const COMMON_WORDS: &[&str] = &[
+        "about", "above", "across", "after", "again", "against", "almost", "along", "already",
+        "also", "although", "always", "among", "another", "answer", "around", "because",
+        "before", "behind", "being", "below", "between", "both", "call", "came", "come",
+        "could", "different", "does", "done", "down", "during", "each", "early", "even",
+        "every", "find", "first", "found", "from", "gave", "give", "good", "great", "have",
+        "having", "head", "hear", "help", "here", "high", "home", "house", "into", "just",
+        "keep", "kind", "know", "large", "last", "leave", "left", "life", "light", "like",
+        "line", "little", "live", "long", "look", "made", "make", "many", "might", "more",
+        "most", "move", "much", "must", "name", "near", "need", "never", "next", "night",
+        "number", "often", "once", "only", "open", "order", "other", "over", "part", "people",
+        "place", "point", "read", "real", "right", "said", "same", "seem", "should", "show",
+        "small", "some", "something", "sound", "stand", "start", "state", "still", "such",
+        "take", "tell", "than", "that", "their", "them", "then", "there", "these", "they",
+        "thing", "think", "this", "those", "thought", "three", "through", "time", "together",
+        "under", "until", "upon", "very", "want", "water", "well", "went", "were", "what",
+        "when", "where", "which", "while", "white", "will", "with", "without", "word", "work",
+        "world", "would", "write", "year", "your",
+    ];
+    COMMON_WORDS.binary_search(&lower).is_ok()
+}
+
 fn correct_word(word: &str, dictionary: &[&String]) -> String {
     if word.is_empty() {
         return String::new();
@@ -1710,6 +1781,15 @@ fn correct_word(word: &str, dictionary: &[&String]) -> String {
         if term.to_lowercase() == lower {
             return match_casing(word, term);
         }
+    }
+
+    // Task 6 Bug A: never fuzzy- or phonetic-replace contractions, very short words,
+    // or common English words. Exact case-insensitive matches above already handled intentional terms.
+    let is_contraction = word.contains('\'') || word.contains('’');
+    let is_short = word.chars().count() < 4;
+    let is_common = is_common_english_word(&lower);
+    if is_contraction || is_short || is_common {
+        return word.to_string();
     }
 
     let p_word = phonetic_code(&lower);
@@ -1808,7 +1888,7 @@ fn apply_personal_dictionary(text: &str, dictionary: &[String]) -> String {
     let mut out = String::with_capacity(result.len());
     let mut word = String::new();
     for c in result.chars() {
-        if c.is_alphanumeric() || c == '\'' {
+        if c.is_alphanumeric() || c == '\'' || c == '’' {
             word.push(c);
         } else {
             out.push_str(&correct_word(&word, &single_words));
@@ -3378,6 +3458,7 @@ fn get_hardware_status(app: tauri::AppHandle) -> HardwareStatusDto {
 #[tauri::command]
 fn apply_hardware_mode() {
     voxtral::unload_engine();
+    lite::unload_engine();
     stt::unload_engine();
     cleanup::unload_engine();
 }
@@ -3641,6 +3722,7 @@ pub fn run() {
             let threshold = settings.vram_eviction_threshold;
             gpu_monitor::start_gpu_monitor(threshold, move || {
                 voxtral::unload_engine();
+                lite::unload_engine();
                 stt::unload_engine();
                 cleanup::unload_engine();
             });
@@ -3657,6 +3739,15 @@ pub fn run() {
                     if let Ok(eng) = stt::engine(&models, prefer_gpu) {
                         let backend = if eng.is_gpu { "GPU (DirectML)" } else { "CPU" };
                         debug_log(&app_handle_warm, &format!("stt engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
+                    }
+                } else if settings.engine.eq_ignore_ascii_case("lite") {
+                    let is_cpu = !prefer_gpu;
+                    match lite::engine(&models, is_cpu) {
+                        Ok(eng) => {
+                            let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                            debug_log(&app_handle_warm, &format!("lite engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
+                        }
+                        Err(e) => debug_log(&app_handle_warm, &format!("lite engine pre-warm failed: {e}")),
                     }
                 } else {
                     let is_cpu = !prefer_gpu;
@@ -3858,6 +3949,43 @@ mod tests {
         assert_eq!(
             apply_personal_dictionary("connect to postgresql database", &dict),
             "connect to PostgreSQL database"
+        );
+    }
+
+    #[test]
+    fn test_common_words_sorted() {
+        assert!(is_common_english_word("about"));
+        assert!(is_common_english_word("have"));
+        assert!(is_common_english_word("your"));
+        assert!(!is_common_english_word("ivy"));
+        assert!(!is_common_english_word("croissant"));
+    }
+
+    #[test]
+    fn test_task6_bug_a_ive_not_replaced_by_ivy() {
+        let dict = vec!["IVY".to_string(), "claude".to_string()];
+        // "I've" with dictionary ["IVY"] must stay "I've"
+        assert_eq!(
+            apply_personal_dictionary("I've contacted support twice", &dict),
+            "I've contacted support twice"
+        );
+        assert_eq!(
+            apply_personal_dictionary("I've booked 40 rooms", &dict),
+            "I've booked 40 rooms"
+        );
+        // Curly apostrophe contraction also stays "I’ve"
+        assert_eq!(
+            apply_personal_dictionary("I’ve contacted support twice", &dict),
+            "I’ve contacted support twice"
+        );
+        // Exact term "ivy" becomes "IVY"
+        assert_eq!(
+            apply_personal_dictionary("ivy is climbing the wall", &dict),
+            "IVY is climbing the wall"
+        );
+        assert_eq!(
+            apply_personal_dictionary("I love ivy plants", &dict),
+            "I love IVY plants"
         );
     }
 }

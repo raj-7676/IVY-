@@ -375,10 +375,12 @@ Measured on an RTX 4060 Laptop GPU (8 GB VRAM) and an Intel Core i7 CPU. The Tas
 |---|---|---|---|---|---|---|---|
 | **Voxtral Mini 3B** | GPU (Vulkan) | 2.65 s | 3715 MB | 374 MB | **0.60 s** | **0.65 s** | **0.95 s** |
 | **Voxtral Mini 3B** | CPU | 1.12 s | 0 MB | 843 MB | 13.01 s | 13.28 s | 25.29 s |
+| **Lite (Qwen3-ASR 1.7B)** | GPU (Vulkan) | 2.45 s | 3660 MB | 412 MB | **0.20 s** | **0.29 s** | **0.28 s** |
+| **Lite (Qwen3-ASR 1.7B)** | CPU | 0.99 s | 0 MB | 620 MB | **1.82 s** | **3.12 s** | **5.99 s** |
 | **Whisper large-v3-turbo** | GPU (DirectML) | 3.52 s | 1114 MB | 527 MB | 0.90 s | 1.14 s | 1.03 s |
 | **Whisper large-v3-turbo** | CPU | 3.18 s | 0 MB | 1070 MB | 2.86 s | 3.41 s | 3.16 s |
 
-Peak RAM is the process working set. The model files are memory-mapped, so mapped weights may not all be counted. Voxtral on CPU (about 13 s for a 5 s clip) is too slow for daily use; that is what the lite tier is for.
+Peak RAM is the process working set. The model files are memory-mapped, so mapped weights may not all be counted. Voxtral on CPU (about 13 s for a 5 s clip) is too slow for daily use; that is what the lite tier is for (1.82 s on CPU).
 Timing per dictation logged to `%APPDATA%\app.ivy.dictation\debug.log` (engine, backend, ms; no transcript text).
 
 ### 8. Acceptance Suite Results (Golden Set)

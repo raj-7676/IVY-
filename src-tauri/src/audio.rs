@@ -271,54 +271,25 @@ pub fn normalize_audio(samples: &[f32]) -> Vec<f32> {
     if samples.is_empty() {
         return Vec::new();
     }
-    let mut normalized = samples.to_vec();
-    let sum_sq: f32 = normalized.iter().map(|&s| s * s).sum();
-    let rms = (sum_sq / normalized.len() as f32).sqrt();
-
-    // Leave true silence and already-loud-enough audio alone entirely —
-    // nothing worth boosting in either case.
-    if !(rms > 0.003 && rms < 0.20) {
-        return normalized;
+    let peak = samples.iter().fold(0.0_f32, |m, &s| m.max(s.abs()));
+    // Leave true silence (< 0.01) and already-loud-enough audio (peak >= 0.70) alone entirely.
+    if peak < 0.01 || peak >= 0.70 {
+        return samples.to_vec();
     }
 
-    const FRAME_LEN: usize = 320; // 20ms @ 16kHz
-    const TARGET_RMS: f32 = 0.25; // -12dBFS, real STT vendor guidance (Corti)
-    // `dagc`'s own docs: "usually values such as 0.001 or 0.0001 are
-    // appropriate" for the distortion factor. Started with the more
-    // conservative 0.0001, but that converges too slowly for Ivy's actual
-    // use case — a short push-to-talk utterance (often just 1-3s) doesn't
-    // give it enough samples to ramp up meaningfully before the clip ends,
-    // confirmed directly by `test_audio_normalization` (a 250ms voiced
-    // segment barely moved, 0.030 -> 0.038). 0.001 converges fast enough
-    // within that timescale, verified by the same test.
-    const DISTORTION_FACTOR: f32 = 0.001;
+    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+    let rms = (sum_sq / samples.len() as f32).sqrt();
 
-    let mut agc =
-        dagc::MonoAgc::new(TARGET_RMS, DISTORTION_FACTOR).expect("TARGET_RMS/DISTORTION_FACTOR are fixed valid constants");
-
-    if normalized.len() >= FRAME_LEN * 4 {
-        let mut frame_rms: Vec<f32> = normalized
-            .chunks(FRAME_LEN)
-            .map(|f| (f.iter().map(|&s| s * s).sum::<f32>() / f.len() as f32).sqrt())
-            .collect();
-        frame_rms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let floor = frame_rms[frame_rms.len() / 10];
-
-        for chunk in normalized.chunks_mut(FRAME_LEN) {
-            let chunk_rms = (chunk.iter().map(|&s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
-            agc.freeze_gain(chunk_rms <= floor * 1.5);
-            agc.process(chunk);
-        }
-    } else {
-        // Too short to estimate a frame-level noise floor — process as one
-        // block; `MonoAgc` still self-limits via its own feedback loop.
-        agc.process(&mut normalized);
+    // Pure uniform noise/tones have peak/rms <= 1.5; real speech contrast has peak/rms >= 2.0.
+    // Leave uniform signals alone (does not amplify pure noise).
+    if rms <= 0.0 || (peak / rms) < 1.6 {
+        return samples.to_vec();
     }
 
-    for s in normalized.iter_mut() {
-        *s = s.clamp(-1.0, 1.0);
-    }
-    normalized
+    // Peak-normalising: scale so the peak is 0.7, gain capped at 20x (Task 7).
+    // Linear scaling preserves speech formants without dynamic pumping or hard-clipping distortion.
+    let gain = (0.7 / peak).min(20.0);
+    samples.iter().map(|&s| (s * gain).clamp(-1.0, 1.0)).collect()
 }
 
 /// Zeroizes an in-memory audio sample slice to prevent sensitive recorded speech from lingering in memory.
