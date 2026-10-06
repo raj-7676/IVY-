@@ -47,7 +47,7 @@ windows = { version = "0.58", features = [
 # matches whisper.cpp/pytorch/librosa reference output; avoids hand-rolling
 # STFT + mel filterbank code).
 cpal = "0.18"
-rubato = "0.16"
+rubato = "5.0"
 llama-cpp-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
 llama-cpp-sys-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
 hound = "3"
