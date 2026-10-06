@@ -79,6 +79,11 @@ jobs:
           vulkan_version: latest
           cache: true
 
+      # .cargo/config.toml builds llama.cpp with Ninja, which needs the MSVC
+      # compiler environment (cl.exe/link.exe on PATH) like a local dev shell.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Run Cargo Check
         working-directory: src-tauri
         run: |

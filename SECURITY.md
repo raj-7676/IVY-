@@ -72,6 +72,9 @@ responding, you may disclose after 90 days.
 - **Typing into the right window.** Before pasting, Ivy checks the window you were dictating into still
   has focus. If it doesn't, the text is held back (Alt + V pastes it) instead of going somewhere else.
   Your previous clipboard is restored afterwards.
+- **Kept out of clipboard history.** Text Ivy puts on the clipboard is marked so Windows leaves it out
+  of clipboard history (Win + V) and cloud clipboard sync, and clipboard managers that respect the
+  Windows flag skip it.
 - **No focus stealing.** The dictation bar never takes keyboard focus, so it cannot interrupt typing in
   password boxes.
 - **Safe file handling.** Recording IDs are checked against a strict allow-list and file paths are
@@ -85,8 +88,8 @@ Being clear about limits is part of security:
 - **Other programs on your PC.** For up to 24 hours, recordings and transcripts are stored unencrypted
   in `%APPDATA%\app.ivy.dictation`, readable by anything running as your Windows user. Clear History if
   that matters to you.
-- **Clipboard watchers.** Ivy pastes through the clipboard for a moment. A program that watches the
-  clipboard could see the text during that moment.
+- **Clipboard readers.** Ivy pastes through the clipboard for a moment. A program that reads the
+  clipboard directly, ignoring the Windows "don't record" flag, could see the text during that moment.
 - **Tampered model files.** Ivy loads its model with llama.cpp. Several llama.cpp bugs have let a
   specially crafted model file crash or take over the program that loads it (for example CVE-2024-25664
   to 25666, CVE-2025-49847, CVE-2026-27940). Only use the model files from this repository's Releases, and
