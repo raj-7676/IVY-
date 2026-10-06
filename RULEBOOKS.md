@@ -131,7 +131,7 @@ Only the **case** changes, never the word.
 
 ## Book 7 — Tone (`tone.rs`)
 Each tone is a step up from the one before (2026-10-06; research: rule-based formality keeps meaning best, GYAFC 2018).
-- **Casual: nothing changes.** The speaker's own wording ("gonna", "like", "yeah") stays.
+- **Casual: texting style.** The speaker's own wording ("gonna", "like", "yeah") stays; sentence-ending full stops are dropped and each sentence goes on its own line (run after every other book, so nothing adds a full stop back). "?", "!", "...", abbreviations (Dr., e.g., p.m.) and numbers stay.
 - **Standard:**
   - slang → full words (gonna, wanna, gotta, kinda, cuz …);
   - ", like," and ", you know," are dropped;

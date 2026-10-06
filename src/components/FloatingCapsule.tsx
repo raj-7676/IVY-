@@ -21,6 +21,8 @@ interface FloatingCapsuleProps {
   /** Where the optional Touch Up click currently stands — only meaningful
    *  while `mode === 'touch-up'`. */
   touchUpStatus?: 'offer' | 'loading' | 'done' | 'clean' | 'error';
+  /** Text for `mode === 'gpu-evicted'`. */
+  notice?: string;
   onRetry?: () => void;
   onCancel?: () => void;
   onTouchUp?: () => void;
@@ -51,6 +53,7 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
   canRetry,
   manualPasteHotkey,
   touchUpStatus = 'offer',
+  notice = '',
   onRetry,
   onCancel,
   onTouchUp,
@@ -206,7 +209,11 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
                 <div className="flex flex-col min-w-0 leading-none">
                   <span className="text-[11px] font-semibold text-white truncate flex items-center gap-1">
                     {formatTime(elapsedSec)} · {activeTone}
-                    {elapsedSec >= 60 && (
+                    {elapsedSec >= 290 ? (
+                      <span className="text-[8.5px] font-semibold text-red-200 bg-red-500/30 px-1.5 py-0.5 rounded-full animate-pulse" title="Ivy finishes and types your words at 5:00">
+                        {Math.max(0, 300 - elapsedSec)}s left
+                      </span>
+                    ) : elapsedSec >= 60 && (
                       <span className="text-[8.5px] font-medium text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded-full" title="Audio is safely buffered">
                         Buffered
                       </span>
@@ -381,6 +388,22 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
                 <span className="w-2 h-2 rounded-full bg-[#E59530]" />
               </div>
               <span className="text-[11.5px] font-medium text-white truncate">Ivy is running in the background</span>
+            </motion.div>
+          )}
+
+          {mode === 'gpu-evicted' && (
+            <motion.div
+              key="gpu-evicted"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: { duration: 0.15 } }}
+              transition={{ duration: 0.2 }}
+              className="flex-1 h-full pl-2.5 pr-3 flex items-center gap-2"
+            >
+              <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-[#E59530]/20 border border-[#E59530]/50">
+                <AlertTriangle className="w-3 h-3 text-[#E59530]" />
+              </div>
+              <span className="text-[11.5px] font-medium text-white truncate">{notice}</span>
             </motion.div>
           )}
 

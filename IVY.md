@@ -29,7 +29,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 **Where things stand (2026-10-06)**
 - **Ivy lite is the only engine** (`lite.rs`). Model files: `src-tauri/models/ivy-lite/` (§4). It applies the speaker's self-corrections in its single pass, so there is no separate correction step and no AI cleanup pass.
 - **No Speed/Accuracy mode** (removed 2026-10-06: corrections cost no extra time, so "Speed" could never be faster). The only runtime choice is GPU or CPU.
-- **Tones are rules** (book 7): Casual = the speaker's words, Standard = slang written out, Professional = formal (§8).
+- **Tones are rules** (book 7): Casual = texting style, Standard = slang written out, Professional = formal (§8). Three modes: the one clicked on the Tone screen applies at once to every app; programs added under a mode (picked as .exe, e.g. brave.exe, matched by the foreground process) always get that mode. `tone_for_label`, 2026-10-06.
 - **Touch Up** = spell-check of the pasted text (`spellcheck.rs`), never rephrasing. **Summarize was removed** (lite can't generate from text). History titles are the first words (`heuristic_title`).
 - **Big round amounts** are written with the scale word ("18 lakhs", "2 million"), book 4 N8.
 - **Installer:** the release is a folder: setup exe + `ivy-lite-Q8_0.gguf` + `mmproj-ivy-lite-f16.gguf`; `hooks.nsh` copies the model in (§17).
@@ -117,7 +117,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 
 hotkey → `audio.rs` capture (own thread) → 16kHz → `normalize_audio` (peak 0.7, max 20x) → Hallucinations stage A (speech gate only) → **lite `transcribe`** (full audio; >120 s split at pauses) → Hallucinations stage B (`clean_asr_text`) → `rulebooks::after_model` (commands, tone, numbers, tech, names, typography) → `apply_personal_dictionary` → `paste_text` → history/stats → `ivy://dictation-complete`.
 
-The only runtime choice is **GPU or CPU** (Settings → Hardware, or the installer). On battery, or when a game fills the GPU (`gpu_monitor`), Ivy uses CPU by itself.
+The only runtime choice is **GPU or CPU** (Settings → Hardware, or the installer). On battery, Ivy uses CPU. **Smart GPU sharing** (``gpu_monitor``, every 3 s, Settings switch): (1) a full-screen app in front for 6 s (Windows' own ``SHQueryUserNotificationState``: busy / D3D full screen / presentation; browsers, terminals, editors and Explorer excluded) puts Ivy to sleep: model unloaded, dictation hotkey unregistered so it reaches the game, no overlay; leaving full screen re-registers the hotkey and pre-warms the model. (2) In GPU mode, when OTHER programs keep the GPU (Windows ``GPU Engine`` counter, busiest engine, Ivy's own process excluded) at or above the user's threshold (50-100%) for 6 s, Ivy unloads, dictates on CPU and shows "GPU above your N% limit · Ivy switched to CPU" on the overlay; back to GPU after 15 s at 15 points below the threshold. Both tested 2026-10-06 (92% load: switched, back 39 s after; full-screen window: asleep with Alt+Space free, awake + reloaded 3 s after).
 
 ## 7. Speech model (`lite.rs`)
 
@@ -134,7 +134,7 @@ The only runtime choice is **GPU or CPU** (Settings → Hardware, or the install
 - Books 3–8: spoken commands, numbers (digits; big round amounts as lakhs/crores/million), tech, names and capitals, tone, typography.
 - **Laws:** whole words only; never trade a spoken word for another (except the tone's fixed lists); when in doubt leave it as spoken; idempotent; fixed order; std-only and under 1 ms.
 - **Tones** (each a step up; research: rule-based formality keeps meaning best):
-  - Casual: nothing changes.
+  - Casual: the speaker's words, texting style: sentence-ending full stops dropped and each sentence on its own line (`casual_endings`, run last); "?", "!", "...", abbreviations and numbers kept.
   - Standard: slang written out ("gonna" → "going to"), ", like," / ", you know," dropped, "off of" → "off".
   - Professional: Standard + contractions written out, chat words → formal ("yeah" → "yes", "btw" → "by the way", "thanks" → "thank you"), an opening "Honestly," / "Basically," dropped, no "!".
   - The Tone screen's samples are the real rule outputs (`tone_screen_samples_are_real`).

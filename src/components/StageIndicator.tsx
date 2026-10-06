@@ -15,12 +15,12 @@ export const StageIndicator: React.FC<StageIndicatorProps> = React.memo(({
   onSelectStage,
 }) => {
   const steps: { stage: OnboardingStage; label: string }[] = [
-    { stage: 1, label: '1. Shortcuts' },
-    { stage: 2, label: '2. Smart Clipboard' },
-    { stage: 3, label: '3. AI & Tips' },
+    { stage: 1, label: '1. Shortcut' },
+    { stage: 2, label: '2. No text box' },
+    { stage: 3, label: '3. GPU or CPU' },
     { stage: 4, label: '4. Touch Up' },
-    { stage: 5, label: '5. Voice Test' },
-    { stage: 6, label: '6. Auto-Correct' },
+    { stage: 5, label: '5. Voice test' },
+    { stage: 6, label: '6. Self-correction' },
     { stage: 7, label: '7. Privacy' },
   ];
 

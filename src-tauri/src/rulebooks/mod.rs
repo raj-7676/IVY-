@@ -66,7 +66,12 @@ pub fn after_model(cleaned: &str, tone: Tone) -> String {
     t = numbers::apply(&t);
     t = tech::apply(&t);
     t = names::apply(&t);
-    typography::apply(&t)
+    t = typography::apply(&t);
+    // Casual is texting style: last, so no later book adds a full stop back
+    if tone == Tone::Casual {
+        t = tone::casual_endings(&t);
+    }
+    t
 }
 
 // ---------------------------------------------------------------------------------------------

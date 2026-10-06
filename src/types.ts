@@ -24,7 +24,7 @@ export interface DictationSession {
 
 export type ScreenState = 'home' | 'history' | 'dictionary' | 'tone' | 'settings' | 'first-run';
 
-export type CapsuleMode = 'idle' | 'recording' | 'transcribing' | 'pasted' | 'failed' | 'undone' | 'launched' | 'manual-pasted' | 'touch-up';
+export type CapsuleMode = 'idle' | 'recording' | 'transcribing' | 'pasted' | 'failed' | 'undone' | 'launched' | 'manual-pasted' | 'touch-up' | 'gpu-evicted';
 
 export type HardwareMode = 'gpu' | 'cpu';
 
@@ -44,9 +44,12 @@ export interface HardwareStatus {
 
 export interface SettingsConfig {
   hotkey: string;
+  /** The mode clicked on the Tone screen: used for every app not added to a mode's list. */
   activeTonePreset: TonePreset;
   presetApps: Record<TonePreset, string[]>;
   personalDictionary: string[];
+  /** Say the trigger on its own and Ivy types the text instead. */
+  snippets: { trigger: string; text: string }[];
   selectedMic: string;
   availableMics: string[];
   /** Main window glass background opacity, 30-95 (%). */

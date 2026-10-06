@@ -1,7 +1,9 @@
 //! Book 7 - Tone. The only book allowed to swap words, each tone a step up from the one before
 //! (Yash, 2026-10-06; style-guide research: rule-based formality keeps meaning best, GYAFC 2018).
 //!
-//! Casual: no change at all. The speaker's own wording ("gonna", "like", "yeah") stays.
+//! Casual (texting style, Yash 2026-10-06): the speaker's own wording ("gonna", "like", "yeah") stays,
+//!   and sentence-ending full stops go, each sentence on its own line (`casual_endings`, run last).
+//!   "?" and "!" stay; "...", abbreviations ("Dr.", "e.g.") and numbers are untouched.
 //! Standard (casual speech written cleanly):
 //!   S1 Slang -> full words: gonna -> going to, wanna -> want to, gotta -> have to, kinda -> kind of,
 //!      sorta -> sort of, dunno -> don't know, cuz / 'cause -> because, imma -> I'm going to.
@@ -142,6 +144,32 @@ pub fn apply(text: &str, tone: Tone) -> String {
     })
 }
 
+const ABBREVIATIONS: &[&str] = &["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "inc", "ltd", "no", "approx"];
+
+/// Casual: drop sentence-ending full stops; a sentence that follows on the same line starts a new line.
+pub fn casual_endings(text: &str) -> String {
+    per_line(text, |line| {
+        let toks: Vec<&str> = line.split(' ').collect();
+        let mut out = String::new();
+        for (i, tok) in toks.iter().enumerate() {
+            let (_, core, r) = split3(tok);
+            let lower = core.to_lowercase();
+            let ends_sentence = r.ends_with('.')
+                && !r.ends_with("..")
+                // e.g. / a.m. / U.S. / 3.5: a dotted token of short parts keeps its dot ("file.py." still loses it)
+                && !(core.contains('.') && core.split('.').all(|p| p.len() <= 2))
+                && !ABBREVIATIONS.contains(&lower.as_str())
+                && !(core.len() == 1 && core.chars().all(|c| c.is_ascii_uppercase())); // initials: "J. K."
+            let word = if ends_sentence { &tok[..tok.len() - 1] } else { tok };
+            out.push_str(word);
+            if i + 1 < toks.len() {
+                out.push(if ends_sentence { '\n' } else { ' ' });
+            }
+        }
+        out
+    })
+}
+
 /// "Don't" -> "Do not", "don't" -> "do not"; "I am" keeps its capital I either way.
 fn match_case(original: &str, replacement: &str) -> String {
     if original.chars().next().map_or(false, |c| c.is_uppercase()) {
@@ -156,10 +184,22 @@ mod tests {
     use super::{apply, Tone};
 
     #[test]
-    fn casual_never_changes() {
+    fn casual_never_changes_words() {
         for s in ["I'm gonna go cuz I wanna see it, like, right now!", "they was talking and he don't know nothing", "Yeah, honestly, it's fine."] {
             assert_eq!(apply(s, Tone::Casual), s);
         }
+    }
+
+    #[test]
+    fn casual_endings_text_style() {
+        use super::casual_endings as c;
+        assert_eq!(c("Hey, there's this crazy thing going on. Do you know Josh? Yeah, he got arrested."),
+                   "Hey, there's this crazy thing going on\nDo you know Josh? Yeah, he got arrested");
+        assert_eq!(c("Wow! Meet Dr. Rao at 5 p.m. tomorrow."), "Wow! Meet Dr. Rao at 5 p.m. tomorrow");
+        assert_eq!(c("It costs 3.5 lakhs... maybe. Open auth_service.py."), "It costs 3.5 lakhs... maybe\nOpen auth_service.py");
+        assert_eq!(c("Line one.\nLine two."), "Line one\nLine two");
+        let once = c("One. Two? Three.");
+        assert_eq!(c(&once), once);
     }
 
     #[test]
@@ -190,11 +230,12 @@ mod tests {
 
     #[test]
     fn tone_screen_samples_are_real() {
-        // the exact samples shown on the Tone screen (src/components/ToneView.tsx)
-        let said = "Yeah, I'm gonna push that fix before standup, thanks!";
-        assert_eq!(apply(said, Tone::Casual), said);
-        assert_eq!(apply(said, Tone::Standard), "Yeah, I'm going to push that fix before standup, thanks!");
-        assert_eq!(apply(said, Tone::Professional), "Yes, I am going to push that fix before standup, thank you.");
+        // the exact samples shown on the Tone screen (src/components/ToneView.tsx), through the full pipeline
+        let said = "Yeah, I'm gonna push that fix before standup. Thanks!";
+        let full = |t| crate::rulebooks::after_model(said, t);
+        assert_eq!(full(Tone::Casual), "Yeah, I'm gonna push that fix before standup\nThanks!");
+        assert_eq!(full(Tone::Standard), "Yeah, I'm going to push that fix before standup. Thanks!");
+        assert_eq!(full(Tone::Professional), "Yes, I am going to push that fix before standup. Thank you.");
     }
 
     #[test]

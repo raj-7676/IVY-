@@ -1,5 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -34,142 +33,244 @@ pub struct GpuTelemetry {
     pub adapter_name: String,
     pub total_vram_mb: u64,
     pub used_vram_mb: u64,
+    /// GPU load from other programs, % (see `GpuLoad`); what the eviction threshold compares against.
     pub usage_percent: u32,
     pub is_evicted: bool,
 }
 
 static IS_EVICTED: AtomicBool = AtomicBool::new(false);
-static LAST_EVICTION_TIME: Mutex<Option<Instant>> = Mutex::new(None);
+/// Latest GPU load from other programs, written by the monitor thread every 3 s.
+static OTHERS_LOAD: AtomicU32 = AtomicU32::new(0);
 
 pub fn is_vram_evicted() -> bool {
     IS_EVICTED.load(Ordering::Relaxed)
 }
 
-pub fn set_vram_evicted(evicted: bool) {
-    IS_EVICTED.store(evicted, Ordering::Relaxed);
-    if evicted {
-        if let Ok(mut t) = LAST_EVICTION_TIME.lock() {
-            *t = Some(Instant::now());
+/// The dedicated GPU (largest VRAM): name, total MB, Ivy's own VRAM use MB, and its LUID as Windows'
+/// counter instance names spell it ("luid_0x00000000_0x00012b5c").
+#[cfg(windows)]
+fn best_adapter() -> Option<(String, u64, u64, String)> {
+    unsafe {
+        let factory = CreateDXGIFactory1::<IDXGIFactory1>().ok()?;
+        let mut best: Option<(String, u64, u64, String)> = None;
+        let mut i = 0;
+        while let Ok(adapter) = factory.EnumAdapters1(i) {
+            i += 1;
+            let Ok(desc) = adapter.GetDesc1() else { continue };
+            if (desc.Flags & 2) != 0 {
+                continue; // Microsoft Basic Render Driver (software fallback)
+            }
+            let name = String::from_utf16_lossy(&desc.Description).trim_matches('\0').to_string();
+            let total_mb = (desc.DedicatedVideoMemory / (1024 * 1024)) as u64;
+            let mut used_mb = 0u64;
+            if let Ok(adapter3) = adapter.cast::<IDXGIAdapter3>() {
+                let mut mem = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+                if adapter3.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut mem).is_ok() {
+                    used_mb = mem.CurrentUsage / (1024 * 1024);
+                }
+            }
+            let luid = format!("luid_0x{:08x}_0x{:08x}", desc.AdapterLuid.HighPart as u32, desc.AdapterLuid.LowPart);
+            if best.as_ref().map_or(true, |b| total_mb > b.1) {
+                best = Some((name, total_mb, used_mb, luid));
+            }
         }
+        best
     }
 }
 
-/// Queries the primary high-performance GPU adapter on Windows via DXGI.
+/// For Settings: the GPU, Ivy's VRAM use, and the current load from other programs.
 pub fn query_gpu_telemetry() -> GpuTelemetry {
     #[cfg(windows)]
-    {
-        unsafe {
-            if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
-                let mut best_adapter: Option<(String, u64, u64, u32)> = None;
-                let mut i = 0;
-                while let Ok(adapter) = factory.EnumAdapters1(i) {
-                    i += 1;
-                    if let Ok(desc) = adapter.GetDesc1() {
-                        // Skip Microsoft Basic Render Driver (software fallback)
-                        if (desc.Flags & 2) != 0 {
-                            continue;
-                        }
-
-                        let name = String::from_utf16_lossy(&desc.Description)
-                            .trim_matches('\0')
-                            .to_string();
-                        let total_vram_bytes = desc.DedicatedVideoMemory;
-                        let total_mb = (total_vram_bytes / (1024 * 1024)) as u64;
-
-                        let mut used_mb = 0u64;
-                        let mut pct = 0u32;
-
-                        if let Ok(adapter3) = adapter.cast::<IDXGIAdapter3>() {
-                            let mut mem_info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
-                            if adapter3
-                                .QueryVideoMemoryInfo(
-                                    0,
-                                    DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
-                                    &mut mem_info,
-                                )
-                                .is_ok()
-                            {
-                                used_mb = mem_info.CurrentUsage / (1024 * 1024);
-                                let denom = if mem_info.Budget > 0 {
-                                    mem_info.Budget
-                                } else if total_vram_bytes > 0 {
-                                    total_vram_bytes as u64
-                                } else {
-                                    1
-                                };
-                                pct = ((mem_info.CurrentUsage * 100) / denom).min(100) as u32;
-                            }
-                        }
-
-                        // Pick the dedicated GPU with the largest VRAM
-                        match &best_adapter {
-                            Some((_, prev_total, _, _)) if *prev_total >= total_mb => {}
-                            _ => {
-                                best_adapter = Some((name, total_mb, used_mb, pct));
-                            }
-                        }
-                    }
-                }
-
-                if let Some((name, total_mb, used_mb, pct)) = best_adapter {
-                    return GpuTelemetry {
-                        adapter_name: name,
-                        total_vram_mb: total_mb,
-                        used_vram_mb: used_mb,
-                        usage_percent: pct,
-                        is_evicted: is_vram_evicted(),
-                    };
-                }
-            }
-        }
+    if let Some((name, total_mb, used_mb, _)) = best_adapter() {
+        return GpuTelemetry {
+            adapter_name: name,
+            total_vram_mb: total_mb,
+            used_vram_mb: used_mb,
+            usage_percent: OTHERS_LOAD.load(Ordering::Relaxed),
+            is_evicted: is_vram_evicted(),
+        };
     }
-
     GpuTelemetry {
         adapter_name: "Default Graphics Adapter".to_string(),
         total_vram_mb: 0,
         used_vram_mb: 0,
-        usage_percent: 0,
+        usage_percent: OTHERS_LOAD.load(Ordering::Relaxed),
         is_evicted: is_vram_evicted(),
     }
 }
 
-/// Spawns the low-overhead background thread that evaluates GPU load every 3 seconds.
-/// When usage reaches or exceeds threshold_percent (e.g. 90%), triggers Smart VRAM Eviction.
-pub fn start_gpu_monitor<F>(threshold_percent: u32, on_evict: F)
+/// GPU load the way Task Manager shows it, from Windows' "GPU Engine" counter (NVIDIA, AMD and Intel all
+/// report it): per engine, the utilisation of every process except Ivy itself is summed, and the busiest
+/// engine wins. Ivy's own transcription runs the GPU near 100% for a moment and must not evict itself.
+#[cfg(windows)]
+struct GpuLoad {
+    query: isize,
+    counter: isize,
+}
+
+#[cfg(windows)]
+impl GpuLoad {
+    fn open() -> Option<Self> {
+        use windows::core::w;
+        use windows::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCollectQueryData, PdhOpenQueryW};
+        unsafe {
+            let mut query = 0isize;
+            if PdhOpenQueryW(windows::core::PCWSTR::null(), 0, &mut query) != 0 {
+                return None;
+            }
+            let mut load = GpuLoad { query, counter: 0 };
+            if PdhAddEnglishCounterW(query, w!("\\GPU Engine(*)\\Utilization Percentage"), 0, &mut load.counter) != 0 {
+                return None; // dropping `load` closes the query
+            }
+            let _ = PdhCollectQueryData(query); // a rate counter needs a first sample to diff against
+            Some(load)
+        }
+    }
+
+    /// Load (%) on adapter `luid` from every process except `own_pid`; None if the read fails.
+    fn others_percent(&self, luid: &str, own_pid: u32) -> Option<f64> {
+        use std::collections::HashMap;
+        use windows::Win32::System::Performance::{
+            PdhCollectQueryData, PdhGetFormattedCounterArrayW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_MORE_DATA,
+        };
+        unsafe {
+            if PdhCollectQueryData(self.query) != 0 {
+                return None;
+            }
+            let (mut size, mut count) = (0u32, 0u32);
+            if PdhGetFormattedCounterArrayW(self.counter, PDH_FMT_DOUBLE, &mut size, &mut count, None) != PDH_MORE_DATA {
+                return None;
+            }
+            let n = size as usize / std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>() + 1;
+            let mut items: Vec<PDH_FMT_COUNTERVALUE_ITEM_W> = Vec::with_capacity(n);
+            if PdhGetFormattedCounterArrayW(self.counter, PDH_FMT_DOUBLE, &mut size, &mut count, Some(items.as_mut_ptr())) != 0 {
+                return None;
+            }
+            items.set_len(count as usize);
+            let own = format!("pid_{own_pid}_");
+            let mut engines: HashMap<String, f64> = HashMap::new();
+            for item in &items {
+                // e.g. "pid_1234_luid_0x00000000_0x00012b5c_phys_0_eng_0_engtype_3D"
+                let name = item.szName.to_string().unwrap_or_default().to_lowercase();
+                if item.FmtValue.CStatus > 1 || name.starts_with(&own) || !name.contains(luid) {
+                    continue;
+                }
+                let engine = name.split_once("_phys_").map_or(name.as_str(), |(_, e)| e).to_string();
+                *engines.entry(engine).or_default() += item.FmtValue.Anonymous.doubleValue;
+            }
+            Some(engines.values().fold(0.0_f64, |m, &v| m.max(v)).min(100.0))
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for GpuLoad {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = windows::Win32::System::Performance::PdhCloseQuery(self.query);
+        }
+    }
+}
+
+/// Programs that may be full screen while the user still wants to dictate (Yash, 2026-10-06: "if I full
+/// screen Brave, Ivy should not close"): browsers, terminals, editors, and the desktop/Explorer.
+const KEEP_AWAKE_IN_FULL_SCREEN: &[&str] = &[
+    "brave.exe", "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "vivaldi.exe", "arc.exe", "zen.exe",
+    "windowsterminal.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "wezterm-gui.exe",
+    "alacritty.exe", "code.exe", "cursor.exe", "notepad.exe", "notepad++.exe", "winword.exe", "explorer.exe",
+];
+
+/// True when Windows itself reports a full-screen app in front (the signal it uses to hold back
+/// notifications: a game, a full-screen video player, a slideshow) and that app isn't on the keep-awake list.
+#[cfg(windows)]
+fn fullscreen_app_in_front() -> bool {
+    use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
+    let full = unsafe { SHQueryUserNotificationState() }
+        .map_or(false, |s| s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE);
+    full && !KEEP_AWAKE_IN_FULL_SCREEN.contains(&crate::foreground_exe_name().to_lowercase().as_str())
+}
+
+/// What the monitor tells Ivy.
+pub enum Event {
+    /// A full-screen app came to the front: unload the model, stop listening for the hotkey, stay silent.
+    Sleep,
+    /// The full-screen app is gone: listen for the hotkey again and load the model back.
+    Wake,
+    /// Other programs pushed the GPU past the threshold: unload and dictate on CPU (load %, threshold %).
+    GpuBusy(u32, u32),
+}
+
+static SLEEPING: AtomicBool = AtomicBool::new(false);
+
+pub fn is_sleeping() -> bool {
+    SLEEPING.load(Ordering::Relaxed)
+}
+
+/// Smart GPU sharing (Yash, 2026-10-06), checked every 3 s while the Settings switch is on:
+/// - Rule 1: a full-screen app (game, video player) in front for 6 s -> `Event::Sleep`; when it leaves the
+///   front -> `Event::Wake`. Full screen wins over rule 2.
+/// - Rule 2, GPU mode only: OTHER programs keeping the GPU at or above the user's threshold (Settings,
+///   50-100%) for 6 s -> `Event::GpuBusy`, and dictation stays on CPU until their load is 15 points below
+///   the threshold for 15 s. One rule for every card: a strong GPU's owner can set 50%, a weak one's 100%.
+/// `settings` returns (enabled, threshold %, GPU mode) live, so Settings changes apply without a restart.
+/// `on_event` returns false when it couldn't act (a dictation was running); the monitor then tries again.
+pub fn start_gpu_monitor<S, F>(settings: S, on_event: F)
 where
-    F: Fn() + Send + Sync + 'static,
+    S: Fn() -> (bool, u32, bool) + Send + 'static,
+    F: Fn(Event) -> bool + Send + Sync + 'static,
 {
     std::thread::Builder::new()
         .name("ivy-gpu-monitor".to_string())
         .spawn(move || {
-            loop {
-                std::thread::sleep(Duration::from_secs(3));
-                let telemetry = query_gpu_telemetry();
-                let evicted = is_vram_evicted();
-
-                if telemetry.usage_percent >= threshold_percent {
-                    if !evicted {
-                        log::warn!(
-                            "Ivy: High GPU usage detected ({}% >= {}%). Triggering Smart VRAM Eviction.",
-                            telemetry.usage_percent,
-                            threshold_percent
-                        );
-                        set_vram_evicted(true);
-                        on_evict();
+            #[cfg(windows)]
+            {
+                let load = GpuLoad::open();
+                if load.is_none() {
+                    log::warn!("Ivy: GPU load counter unavailable; only the full-screen rule is on");
+                }
+                let luid = best_adapter().map(|a| a.3).unwrap_or_default();
+                let own_pid = std::process::id();
+                let (mut high_samples, mut low_since): (u32, Option<Instant>) = (0, None);
+                let mut fullscreen_samples = 0u32;
+                loop {
+                    std::thread::sleep(Duration::from_secs(3));
+                    let pct = load.as_ref().and_then(|l| l.others_percent(&luid, own_pid));
+                    if let Some(p) = pct {
+                        OTHERS_LOAD.store(p.round() as u32, Ordering::Relaxed);
                     }
-                } else if telemetry.usage_percent < 70 && evicted {
-                    let can_restore = if let Ok(guard) = LAST_EVICTION_TIME.lock() {
-                        guard.map_or(true, |t| t.elapsed() >= Duration::from_secs(15))
+                    let (enabled, threshold, gpu_mode) = settings();
+                    let full = enabled && fullscreen_app_in_front();
+                    fullscreen_samples = if full { fullscreen_samples + 1 } else { 0 };
+                    if !is_sleeping() && fullscreen_samples >= 2 && on_event(Event::Sleep) {
+                        log::info!("Ivy: a full-screen app is in front. Sleeping (model unloaded, hotkey off).");
+                        SLEEPING.store(true, Ordering::Relaxed);
+                    } else if is_sleeping() && !full && on_event(Event::Wake) {
+                        log::info!("Ivy: full screen ended. Awake again.");
+                        SLEEPING.store(false, Ordering::Relaxed);
+                    }
+                    if !enabled || !gpu_mode {
+                        IS_EVICTED.store(false, Ordering::Relaxed);
+                        continue;
+                    }
+                    let (Some(pct), false) = (pct, is_sleeping()) else { continue };
+                    let threshold = threshold as f64;
+                    if !is_vram_evicted() {
+                        high_samples = if pct >= threshold { high_samples + 1 } else { 0 };
+                        if high_samples >= 2 && on_event(Event::GpuBusy(pct.round() as u32, threshold as u32)) {
+                            log::warn!("Ivy: other programs are using the GPU at {pct:.0}% (>= {threshold:.0}%). Dictating on CPU.");
+                            IS_EVICTED.store(true, Ordering::Relaxed);
+                            high_samples = 0;
+                            low_since = None;
+                        }
+                    } else if pct < threshold - 15.0 {
+                        let since = *low_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() >= Duration::from_secs(15) {
+                            log::info!("Ivy: GPU load from other programs is down to {pct:.0}%. Using the GPU again.");
+                            IS_EVICTED.store(false, Ordering::Relaxed);
+                            low_since = None;
+                        }
                     } else {
-                        true
-                    };
-
-                    if can_restore {
-                        log::info!(
-                            "Ivy: GPU load normalized ({}% < 70%). Re-enabling GPU allocation.",
-                            telemetry.usage_percent
-                        );
-                        set_vram_evicted(false);
+                        low_since = None;
                     }
                 }
             }

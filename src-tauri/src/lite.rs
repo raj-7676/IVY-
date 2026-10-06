@@ -318,7 +318,7 @@ impl LiteEngine {
 }
 
 /// Longest piece sent to the model in one pass. 120 s of audio is ~1,560 audio tokens plus up to ~784 output
-/// tokens, well inside the 4,096-token context. Ivy allows dictations up to 500 s.
+/// tokens, well inside the 4,096-token context. Ivy allows dictations up to 300 s.
 pub const CHUNK_SECS: usize = 120;
 
 /// Splits audio longer than `CHUNK_SECS` into pieces, cutting each at the quietest 100 ms window

@@ -11,6 +11,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod audio;
 mod rulebooks;
 pub(crate) mod gpu_monitor;
+mod modifier_hotkey;
 mod spellcheck;
 pub mod lite;
 
@@ -92,6 +93,9 @@ struct PendingDictation {
     // the shared `LAST_EXTERNAL_HWND` global at paste time, which a second,
     // overlapping dictation could have already overwritten by then.
     target_hwnd: isize,
+    /// Started while the setup wizard was the window in front: a practice run. Its text goes back to the
+    /// wizard only (no paste, no history, no Alt+V hold-back, no stats).
+    for_wizard: bool,
 }
 static PENDING: Mutex<Option<PendingDictation>> = Mutex::new(None);
 // See `handle_hotkey_down` — guards the real TOCTOU window between "check
@@ -259,37 +263,49 @@ struct SettingsConfig {
     manual_paste_hotkey: String,
     #[serde(default = "default_onboarding_completed")]
     onboarding_completed: bool,
+    /// Say a trigger on its own ("my email") and Ivy types the saved text instead.
+    #[serde(default)]
+    snippets: Vec<Snippet>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct Snippet {
+    trigger: String,
+    text: String,
+}
+
+/// Lowercase words only, so "My email." and "my email" match.
+fn snippet_key(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The whole dictation must be the trigger (Yash, 2026-10-06): "check my email" stays as said.
+fn apply_snippets(text: &str, snippets: &[Snippet]) -> Option<String> {
+    let said = snippet_key(text);
+    snippets.iter().find(|s| !said.is_empty() && snippet_key(&s.trigger) == said).map(|s| s.text.clone())
 }
 
 impl Default for SettingsConfig {
     fn default() -> Self {
+        // Programs, picked by their .exe (Yash, 2026-10-06: names were confusing and often didn't match).
+        let list = |apps: &[&str]| apps.iter().map(|a| a.to_string()).collect::<Vec<_>>();
         let mut preset_apps = HashMap::new();
-        preset_apps.insert(
-            "Casual".to_string(),
-            vec!["Instagram", "Discord", "WhatsApp", "Messages"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-        );
-        preset_apps.insert(
-            "Standard".to_string(),
-            vec!["VS Code", "Figma", "Terminal", "Notion", "Cursor"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-        );
-        preset_apps.insert(
-            "Professional".to_string(),
-            vec!["Outlook", "Gmail", "Slack", "Linear"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-        );
+        preset_apps.insert("Casual".to_string(), list(&["WhatsApp.exe", "Discord.exe", "Telegram.exe"]));
+        preset_apps.insert("Standard".to_string(), list(&["Code.exe", "Notion.exe", "WindowsTerminal.exe"]));
+        preset_apps.insert("Professional".to_string(), list(&["OUTLOOK.EXE", "olk.exe", "slack.exe", "ms-teams.exe", "WINWORD.EXE"]));
         Self {
             hotkey: "Alt + Space".to_string(),
             active_tone_preset: "Standard".to_string(),
             preset_apps,
             personal_dictionary: vec![],
+            snippets: vec![],
             // Empty means "system default input device" — resolved for
             // real by audio::Recorder::start, never a placeholder name.
             selected_mic: String::new(),
@@ -612,6 +628,16 @@ fn purge_old_history(app: &tauri::AppHandle) {
         }
     }
     sessions.retain(|s| s.created_at == 0 || (now - s.created_at) / 1000 <= RETENTION_SECS);
+    // Any recording older than a day, even one history no longer lists, goes too.
+    if let Ok(entries) = fs::read_dir(audio_dir(app)) {
+        for entry in entries.flatten() {
+            let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok())
+                .map_or(false, |age| age.as_secs() as i64 > RETENTION_SECS);
+            if old {
+                wipe_file(&entry.path());
+            }
+        }
+    }
     if sessions.len() != before {
         write_history_atomic(app, &sessions);
         let _ = app.emit("ivy://history-updated", ());
@@ -813,6 +839,20 @@ fn foreground_app_label() -> String {
     }
 }
 
+/// The foreground window's program, e.g. "brave.exe" ("" if unknown). Tone app lists match on this.
+#[cfg(windows)]
+fn foreground_exe_name() -> String {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return String::new();
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        exe_name_for_pid(pid)
+    }
+}
+
 #[cfg(windows)]
 fn capture_foreground_hwnd() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
@@ -844,6 +884,10 @@ fn is_explorer_shell(hwnd: isize) -> bool {
 #[cfg(not(windows))]
 fn foreground_app_label() -> String {
     "Desktop".to_string()
+}
+#[cfg(not(windows))]
+fn foreground_exe_name() -> String {
+    String::new()
 }
 #[cfg(not(windows))]
 fn capture_foreground_hwnd() -> isize {
@@ -967,6 +1011,13 @@ fn apply_hotkey_binding(
     new_spec: &str,
     slot: Option<&Mutex<Option<Shortcut>>>,
 ) -> Result<(), String> {
+    if slot.is_none() && new_spec == modifier_hotkey::SPEC {
+        set_ctrl_shift(app, true);
+        if let Some(old) = parse_hotkey(old_spec) {
+            let _ = app.global_shortcut().unregister(old);
+        }
+        return Ok(());
+    }
     let new_shortcut = parse_hotkey(new_spec).ok_or_else(|| format!("Couldn't understand the shortcut \"{new_spec}\""))?;
     app.global_shortcut()
         .register(new_shortcut)
@@ -976,24 +1027,28 @@ fn apply_hotkey_binding(
     }
     if let Some(cell) = slot {
         *cell.lock().unwrap_or_else(|e| e.into_inner()) = Some(new_shortcut);
+    } else {
+        set_ctrl_shift(app, false);
     }
     Ok(())
 }
 
-fn tone_for_label(settings: &SettingsConfig, label: &str) -> String {
-    let lower = label.to_lowercase();
-    for (tone, apps) in &settings.preset_apps {
-        if tone == "Standard" {
-            continue;
-        }
-        if apps.iter().any(|a| lower.contains(&a.to_lowercase())) {
-            return tone.clone();
+/// The tone for a dictation (Yash, 2026-10-06): three modes. A program the user added to a mode's list
+/// always gets that mode; every other app gets the mode clicked on the Tone screen, at once. List entries
+/// ending in ".exe" match the foreground program exactly; older name entries match the window title.
+fn tone_for_label(settings: &SettingsConfig, title: &str, exe: &str) -> String {
+    let title = title.to_lowercase();
+    for tone in ["Casual", "Professional", "Standard"] {
+        if let Some(apps) = settings.preset_apps.get(tone) {
+            let hit = apps.iter().any(|a| {
+                let a = a.trim().to_lowercase();
+                if a.ends_with(".exe") { a.eq_ignore_ascii_case(exe) } else { !a.is_empty() && title.contains(&a) }
+            });
+            if hit {
+                return tone.to_string();
+            }
         }
     }
-    // Not a hardcoded "Standard" — that silently ignored the Tone screen's
-    // "Make X the default" button entirely (it only ever updated a badge
-    // in the UI and settings.json, never what actually got applied to an
-    // app with no explicit preset match).
     settings.active_tone_preset.clone()
 }
 
@@ -1015,7 +1070,13 @@ fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
     }
 }
 
+/// The only dictation keys Ivy offers (Yash, 2026-10-06). Undo (Alt + B) and held-back paste (Alt + V) are fixed.
+const DICTATION_KEYS: [&str; 2] = ["Alt + Space", modifier_hotkey::SPEC];
+
 fn validate_settings(s: &SettingsConfig) -> Result<(), String> {
+    if !DICTATION_KEYS.contains(&s.hotkey.as_str()) {
+        return Err("The dictation shortcut can be Alt + Space or Ctrl + Shift.".into());
+    }
     if s.hotkey.len() > 64 || s.undo_paste_hotkey.len() > 64 || s.manual_paste_hotkey.len() > 64 {
         return Err("hotkey string exceeds maximum allowable length (64 chars)".into());
     }
@@ -1044,6 +1105,9 @@ fn validate_settings(s: &SettingsConfig) -> Result<(), String> {
     }
     if s.selected_mic.len() > 256 {
         return Err("selected microphone identifier too long".into());
+    }
+    if s.snippets.len() > 200 || s.snippets.iter().any(|x| x.trigger.len() > 80 || x.text.len() > 5000 || snippet_key(&x.trigger).is_empty()) {
+        return Err("A snippet needs a trigger (up to 80 characters) and text up to 5,000 characters; 200 at most.".into());
     }
     if s.personal_dictionary.len() > 5000 {
         return Err("personal dictionary exceeds maximum allowable entries (5000)".into());
@@ -1099,6 +1163,11 @@ fn save_settings(app: tauri::AppHandle, settings: SettingsConfig) -> Result<(), 
 
     write_settings_atomic(&app, &settings)?;
     debug_log(&app, &format!("settings saved: hardware={}", settings.hardware_mode));
+    // GPU <-> CPU: load the model in the new place now, so the next dictation isn't the slow first one.
+    if settings.hardware_mode != old_settings.hardware_mode {
+        lite::unload_engine();
+        prewarm(&app);
+    }
     // Long-lived windows (the capsule) are created once at startup and
     // never poll for settings changes on their own — without this, e.g.
     // changing Dictation Mode here left the capsule's Touch Up gate
@@ -1136,15 +1205,33 @@ fn delete_history_entry(app: tauri::AppHandle, id: String) -> Result<(), String>
 #[tauri::command]
 fn clear_all_history(app: tauri::AppHandle) -> Result<(), String> {
     let _guard = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let sessions = load_history(&app);
-    for s in &sessions {
-        if path_within_audio_dir(&app, &s.audio_path) {
-            let _ = fs::remove_file(&s.audio_path);
+    // Every file in the recordings folder, listed in history or not, overwritten with zeros, then deleted.
+    if let Ok(entries) = fs::read_dir(audio_dir(&app)) {
+        for entry in entries.flatten() {
+            wipe_file(&entry.path());
         }
     }
+    // The transcripts: the old history file is overwritten in place before it's replaced.
+    wipe_file(&history_path(&app));
+    let _ = fs::remove_file(history_path(&app).with_extension("json.tmp"));
     write_history_atomic(&app, &[]);
+    // Copies held in memory for Alt + V and Alt + B.
+    *MANUAL_PASTE_TEXT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *LAST_PASTE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    debug_log(&app, "clear all: recordings and transcripts wiped");
     let _ = app.emit("ivy://history-updated", ());
     Ok(())
+}
+
+/// Overwrites a file with zeros, then deletes it. (On an SSD the drive itself may still keep old blocks
+/// until it reuses them; no app can force that.)
+fn wipe_file(path: &std::path::Path) {
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.is_file() {
+            let _ = fs::write(path, vec![0u8; meta.len() as usize]);
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 /// Returns the user's lifetime progress, streak, and daily activity.
@@ -1248,7 +1335,8 @@ fn transcribe_and_clean(
         return String::new();
     }
 
-    let dictionary = load_settings(app).personal_dictionary;
+    let settings = load_settings(app);
+    let dictionary = settings.personal_dictionary;
     let t_lite = std::time::Instant::now();
     let is_cpu_mode = !prefer_gpu;
     let raw = match lite::engine(models, is_cpu_mode) {
@@ -1283,6 +1371,9 @@ fn transcribe_and_clean(
     let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
     if raw.is_empty() {
         return raw;
+    }
+    if let Some(snippet) = apply_snippets(&raw, &settings.snippets) {
+        return snippet; // typed exactly as saved, no tone or formatting
     }
     let formatted = rulebooks::after_model(&raw, rulebooks::Tone::from_label(tone_preset));
     apply_personal_dictionary(&formatted, &dictionary)
@@ -1777,8 +1868,9 @@ const SILENCE_PEAK_THRESHOLD: f32 = 0.01;
 // so this cap only needs to be a sane outer bound on a single dictation,
 // not a workaround for that failure mode — a real ~2 minute recording was
 // cut off at the old 60s value (Yash: "it only translated half, the other
-// half is gone"). Raised again to 500s (Yash: "people talk a lot, man").
-const MAX_DICTATION_SECS: f64 = 500.0;
+// half is gone"). 5 minutes (Yash, 2026-10-06). At the limit the recording is finished and pasted
+// (see the level thread in `handle_hotkey_down`), never silently cut.
+const MAX_DICTATION_SECS: f64 = 300.0;
 
 fn run_dictation_pipeline(
     app: tauri::AppHandle,
@@ -1787,6 +1879,7 @@ fn run_dictation_pipeline(
     tone_preset: String,
     dictation_id: u64,
     target_hwnd: isize,
+    for_wizard: bool,
 ) {
     if is_dictation_cancelled(dictation_id) {
         debug_log(&app, "pipeline aborted: dictation cancelled by user before processing");
@@ -1852,6 +1945,16 @@ fn run_dictation_pipeline(
         debug_log(&app, "pipeline aborted: dictation cancelled by user after transcription — discarding recording and history");
         bridge_capsule_show(&app, false);
         audio::zeroize_samples(&mut samples);
+        return;
+    }
+
+    if for_wizard {
+        audio::zeroize_samples(&mut samples);
+        debug_log(&app, "wizard practice dictation: result sent to the wizard only (not pasted, not saved)");
+        let _ = app.emit(
+            "ivy://dictation-complete",
+            DictationComplete { success: !text.is_empty(), reason: String::new(), active_app, session_id: String::new(), pasted: false, text },
+        );
         return;
     }
 
@@ -2223,11 +2326,24 @@ fn repaste_transcript(text: String) -> Result<bool, String> {
 fn get_active_context(app: tauri::AppHandle) -> ActiveContext {
     let label = foreground_app_label();
     let settings = load_settings(&app);
-    let tone = tone_for_label(&settings, &label);
+    let tone = tone_for_label(&settings, &label, &foreground_exe_name());
     ActiveContext {
         active_app: label,
         tone_preset: tone,
     }
+}
+
+/// Puts a transcript on the clipboard just long enough to paste it, marked so Windows keeps it out of
+/// clipboard history (Win+V), cloud clipboard sync and clipboard monitors: no copy outlives Ivy's history.
+fn set_clipboard_private(text: &str) -> Result<(), arboard::Error> {
+    let mut clipboard = arboard::Clipboard::new()?;
+    #[cfg(windows)]
+    {
+        use arboard::SetExtWindows;
+        clipboard.set().exclude_from_history().exclude_from_cloud().exclude_from_monitoring().text(text.to_string())
+    }
+    #[cfg(not(windows))]
+    clipboard.set_text(text.to_string())
 }
 
 #[cfg(windows)]
@@ -2471,9 +2587,7 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
     // A target app can still swallow a Ctrl+V that SendInput reports as sent,
     // so Alt+V must always be able to re-paste the latest transcript.
     *MANUAL_PASTE_TEXT.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.clone());
-    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-        let _ = clipboard.set_text(text);
-    }
+    let _ = set_clipboard_private(&text);
     std::thread::sleep(std::time::Duration::from_millis(60));
     #[cfg(windows)]
     unsafe {
@@ -2722,6 +2836,25 @@ fn hide_capsule_window(app: tauri::AppHandle) {
     bridge_capsule_show(&app, false);
 }
 
+/// Loads the model in the background, with one silent practice pass, so the next dictation starts at once
+/// (Yash: "the first reply takes a lot of time"). At startup and when a full-screen app goes away.
+fn prewarm(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let models = models_dir(&app);
+        let prefer_gpu = should_use_gpu(&app);
+        let t_warm = std::time::Instant::now();
+        match lite::engine(&models, !prefer_gpu) {
+            Ok(eng) => {
+                let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                let _ = eng.transcribe(&vec![0.0; 16_000], &[], std::time::Duration::from_secs(60));
+                debug_log(&app, &format!("lite engine pre-warmed via {backend} in {}ms (incl. a silent warm-up pass)", t_warm.elapsed().as_millis()));
+            }
+            Err(e) => debug_log(&app, &format!("lite engine pre-warm failed: {e}")),
+        }
+    });
+}
+
 fn handle_hotkey_down(app: &tauri::AppHandle) {
     // Real TOCTOU otherwise: this function is reachable concurrently from
     // three independent threads (the global-shortcut handler, the tray
@@ -2771,6 +2904,7 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
         .map(|h| h.0 as isize)
         .unwrap_or(0);
     let target_hwnd = if fg != 0 && fg != capsule_hwnd && fg != main_hwnd && !is_explorer_shell(fg) { fg } else { 0 };
+    let for_wizard = WIZARD_ACTIVE.load(Ordering::SeqCst) && fg != 0 && fg == main_hwnd;
     if target_hwnd != 0 {
         *LAST_EXTERNAL_HWND.lock().unwrap_or_else(|e| e.into_inner()) = target_hwnd;
     }
@@ -2784,6 +2918,7 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
                 active_app: ctx.active_app.clone(),
                 tone_preset: ctx.tone_preset.clone(),
                 target_hwnd,
+                for_wizard,
             });
             STARTING_DICTATION.store(false, Ordering::SeqCst);
         }
@@ -2821,19 +2956,28 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
     // meters never need to open the mic a second time (a concurrent WebView2
     // getUserMedia on the same device delayed and zeroed this capture).
     let app_level = app.clone();
+    let started = Instant::now();
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_millis(50));
         let level = match PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(p) if p.id == id => p.recorder.level(),
             _ => break,
         };
+        if started.elapsed().as_secs_f64() >= MAX_DICTATION_SECS {
+            // Time's up: finish it like a release (hands-free or held), so nothing said is lost.
+            debug_log(&app_level, "reached the 5-minute limit — finishing the dictation");
+            TOGGLE_RECORDING.store(false, Ordering::SeqCst);
+            CURRENT_PRESS_TIME.lock().unwrap_or_else(|e| e.into_inner()).take();
+            handle_hotkey_up(&app_level);
+            break;
+        }
         let _ = app_level.emit("ivy://mic-level", level);
     });
 }
 
 fn handle_hotkey_up(app: &tauri::AppHandle) {
     // Taken out of the mutex (and the guard dropped) before any real work —
-    // `recorder.stop()` can resample up to 500s of audio and `debug_log`
+    // `recorder.stop()` can resample up to 300s of audio and `debug_log`
     // does file I/O; holding the lock across either would block every other
     // `PENDING`/`LAST_EXTERNAL_HWND` access (including a panic anywhere in
     // that span poisoning the lock) for as long as it takes.
@@ -2855,6 +2999,7 @@ fn handle_hotkey_up(app: &tauri::AppHandle) {
     let app_handle = app.clone();
     let dictation_id = pending.id;
     let target_hwnd = pending.target_hwnd;
+    let for_wizard = pending.for_wizard;
     std::thread::spawn(move || {
         run_dictation_pipeline(
             app_handle,
@@ -2863,8 +3008,142 @@ fn handle_hotkey_up(app: &tauri::AppHandle) {
             pending.tone_preset,
             dictation_id,
             target_hwnd,
+            for_wizard,
         );
     });
+}
+
+/// One press or release of the dictation key, from the OS hotkey (Alt + Space) or the Ctrl + Shift watcher.
+fn dictation_key(app: &tauri::AppHandle, pressed: bool) {
+    // Raw event, logged before any routing: shows whether a Released ever arrived during a stuck recording.
+    debug_log(app, &format!("raw hotkey event: {}", if pressed { "Pressed" } else { "Released" }));
+    if pressed && is_paused() {
+        return; // e.g. the shortcut was changed in Settings during a pause
+    }
+    if pressed {
+        // A duplicate Pressed while already down (OS key-repeat) is swallowed here.
+        if HOTKEY_PHYSICALLY_DOWN.swap(true, Ordering::SeqCst) {
+            debug_log(app, "raw hotkey event: Pressed while already down — duplicate/auto-repeat, ignored");
+            return;
+        }
+        route_dictation_press(app);
+    } else {
+        if !HOTKEY_PHYSICALLY_DOWN.swap(false, Ordering::SeqCst) {
+            debug_log(app, "raw hotkey event: Released while already up — duplicate, ignored");
+            return;
+        }
+        route_dictation_release(app);
+    }
+}
+
+/// Turns the Ctrl + Shift dictation key on or off (modifier_hotkey.rs).
+fn set_ctrl_shift(app: &tauri::AppHandle, on: bool) {
+    let app = app.clone();
+    modifier_hotkey::set_enabled(on, move |key| {
+        debug_log(&app, &format!("ctrl+shift watcher: {key:?}"));
+        match key {
+        modifier_hotkey::Key::Press if !gpu_monitor::is_sleeping() => dictation_key(&app, true),
+        modifier_hotkey::Key::Press => {}
+        modifier_hotkey::Key::Release => dictation_key(&app, false),
+        // Ctrl+Shift+T and friends: not a dictation. Drop the recording it started, if one is running.
+        modifier_hotkey::Key::Cancel => {
+            HOTKEY_PHYSICALLY_DOWN.store(false, Ordering::SeqCst);
+            CURRENT_PRESS_TIME.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let recording = PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+            if recording && !TOGGLE_RECORDING.load(Ordering::SeqCst) {
+                cancel_dictation_internal(&app, "Ctrl + Shift was part of another shortcut — recording dropped");
+            }
+        }
+        }
+    });
+}
+
+/// Turns the dictation key on or off (pause, full-screen sleep), whichever key the user picked.
+fn set_dictation_key_active(app: &tauri::AppHandle, on: bool) {
+    let spec = load_settings(app).hotkey;
+    if spec == modifier_hotkey::SPEC {
+        set_ctrl_shift(app, on);
+    } else if let Some(h) = parse_hotkey(&spec) {
+        let _ = if on { app.global_shortcut().register(h) } else { app.global_shortcut().unregister(h) };
+    }
+}
+
+/// "Pause Ivy" (Yash, 2026-10-06): 1 hour by default, or any length from 1 minute up to 24 hours. While
+/// paused, the dictation key goes back to other apps and the model is unloaded; Ivy resumes by itself when
+/// the time is up. Kept in memory only, so restarting Ivy or the PC also resumes it.
+const MAX_PAUSE_MINUTES: u32 = 24 * 60;
+static PAUSED_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+static PAUSE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+fn is_paused() -> bool {
+    PAUSED_UNTIL_MS.load(Ordering::SeqCst) > now_ms()
+}
+
+fn pause_changed(app: &tauri::AppHandle) {
+    let until = PAUSED_UNTIL_MS.load(Ordering::SeqCst);
+    if let Some(item) = app.try_state::<PauseMenuItem>() {
+        let _ = item.0.set_text(if until > 0 { "Resume Ivy" } else { "Pause Ivy for 1 hour" });
+    }
+    let _ = app.emit("ivy://pause-changed", until);
+}
+
+struct PauseMenuItem(tauri::menu::MenuItem<tauri::Wry>);
+
+/// Returns when the pause ends (ms since 1970).
+#[tauri::command]
+fn pause_ivy(app: tauri::AppHandle, minutes: u32) -> Result<u64, String> {
+    if minutes == 0 || minutes > MAX_PAUSE_MINUTES {
+        return Err("Pause for 1 minute up to 24 hours.".into());
+    }
+    let until = now_ms() + minutes as u64 * 60_000;
+    let was_paused = PAUSED_UNTIL_MS.swap(until, Ordering::SeqCst) > 0;
+    if !was_paused {
+        if PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+            cancel_dictation_internal(&app, "Ivy paused — recording dropped");
+        }
+        set_dictation_key_active(&app, false);
+        lite::unload_engine();
+    }
+    debug_log(&app, &format!("paused for {minutes} min"));
+    let generation = PAUSE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let timer_app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        if PAUSE_GENERATION.load(Ordering::SeqCst) != generation {
+            break; // resumed, or the pause was changed
+        }
+        if now_ms() >= PAUSED_UNTIL_MS.load(Ordering::SeqCst) {
+            resume_ivy(timer_app);
+            break;
+        }
+    });
+    pause_changed(&app);
+    Ok(until)
+}
+
+#[tauri::command]
+fn resume_ivy(app: tauri::AppHandle) {
+    PAUSE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    if PAUSED_UNTIL_MS.swap(0, Ordering::SeqCst) == 0 {
+        return;
+    }
+    // While a full-screen app is in front the key stays off; waking from that turns it back on.
+    if !gpu_monitor::is_sleeping() {
+        set_dictation_key_active(&app, true);
+        prewarm(&app);
+    }
+    debug_log(&app, "resumed");
+    pause_changed(&app);
+}
+
+/// When the current pause ends (ms since 1970), 0 when not paused.
+#[tauri::command]
+fn get_pause() -> u64 {
+    if is_paused() { PAUSED_UNTIL_MS.load(Ordering::SeqCst) } else { 0 }
 }
 
 /// Routes every press of the dictation hotkey — hold and double-press live
@@ -3050,8 +3329,8 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
     // Read before overwriting — this is the one and only chance to know
     // what the clipboard held before Ivy temporarily swaps it out.
     let previous_clipboard = arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok();
-    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-        if clipboard.set_text(text.clone()).is_err() {
+    if arboard::Clipboard::new().is_ok() {
+        if set_clipboard_private(&text).is_err() {
             debug_log(app, "manual-paste: couldn't access the clipboard");
             position_capsule_window(app);
             bridge_capsule_show(app, true);
@@ -3173,6 +3452,7 @@ fn cancel_dictation_internal(app: &tauri::AppHandle, reason: &str) {
         let _ = pending.recorder.stop();
     }
     bridge_capsule_show(app, false);
+    let _ = app.emit("ivy://dictation-cancelled", ());
     debug_log(app, reason);
 }
 
@@ -3311,33 +3591,7 @@ pub fn run() {
                         }
                         return;
                     }
-                    // Raw OS event, logged before any of our own routing
-                    // logic runs — isolates whether Windows/the global-
-                    // shortcut plugin ever delivers a Released event at all
-                    // during a stuck-recording episode, versus our own
-                    // routing code receiving one and failing to act on it.
-                    debug_log(app, &format!("raw hotkey event: {:?}", event.state()));
-                    match event.state() {
-                        ShortcutState::Pressed => {
-                            // `swap` both reads the previous value and sets
-                            // true atomically — a duplicate Pressed while
-                            // already down (OS key-repeat, confirmed live)
-                            // is swallowed here, before it can reach
-                            // `route_dictation_press` at all.
-                            if HOTKEY_PHYSICALLY_DOWN.swap(true, Ordering::SeqCst) {
-                                debug_log(app, "raw hotkey event: Pressed while already down — duplicate/auto-repeat, ignored");
-                                return;
-                            }
-                            route_dictation_press(app);
-                        }
-                        ShortcutState::Released => {
-                            if !HOTKEY_PHYSICALLY_DOWN.swap(false, Ordering::SeqCst) {
-                                debug_log(app, "raw hotkey event: Released while already up — duplicate, ignored");
-                                return;
-                            }
-                            route_dictation_release(app);
-                        }
-                    }
+                    dictation_key(app, event.state() == ShortcutState::Pressed);
                 })
                 .build(),
         )
@@ -3362,6 +3616,9 @@ pub fn run() {
             extract_audio,
             start_manual_dictation,
             stop_manual_dictation,
+            pause_ivy,
+            resume_ivy,
+            get_pause,
             trigger_undo_paste,
             get_hardware_status,
             apply_hardware_mode,
@@ -3392,16 +3649,33 @@ pub fn run() {
             // Real Windows Run-key launch, not a manual one — see the
             // `--autostart` arg registered with the plugin above.
             let launched_via_autostart = std::env::args().any(|a| a == "--autostart");
-            let startup_settings = load_settings(&app.handle());
+            let mut startup_settings = load_settings(&app.handle());
+            // Anything else saved by an older version (e.g. a bare "Space" that would eat the spacebar) goes back
+            // to the default, and the fixed undo/paste keys are restored.
+            if !DICTATION_KEYS.contains(&startup_settings.hotkey.as_str())
+                || startup_settings.undo_paste_hotkey != "Alt + B"
+                || startup_settings.manual_paste_hotkey != "Alt + V"
+            {
+                if !DICTATION_KEYS.contains(&startup_settings.hotkey.as_str()) {
+                    startup_settings.hotkey = "Alt + Space".to_string();
+                }
+                startup_settings.undo_paste_hotkey = "Alt + B".to_string();
+                startup_settings.manual_paste_hotkey = "Alt + V".to_string();
+                let _ = write_settings_atomic(&app.handle(), &startup_settings);
+            }
             sync_autostart(&app.handle(), startup_settings.launch_at_startup);
             // Registers whatever hotkey the user last saved, not a hardcoded
             // Alt+Space — `parse_hotkey` returning `None` for a corrupt
             // settings value falls back to the real default rather than
             // registering nothing.
-            let startup_hotkey = parse_hotkey(&startup_settings.hotkey)
-                .unwrap_or_else(|| Shortcut::new(Some(Modifiers::ALT), Code::Space));
-            if let Err(e) = app.global_shortcut().register(startup_hotkey) {
-                log::error!("Ivy: {} didn't register ({e}) — something else on this PC already has it.", startup_settings.hotkey);
+            if startup_settings.hotkey == modifier_hotkey::SPEC {
+                set_ctrl_shift(&app.handle().clone(), true);
+            } else {
+                let startup_hotkey = parse_hotkey(&startup_settings.hotkey)
+                    .unwrap_or_else(|| Shortcut::new(Some(Modifiers::ALT), Code::Space));
+                if let Err(e) = app.global_shortcut().register(startup_hotkey) {
+                    log::error!("Ivy: {} didn't register ({e}) — something else on this PC already has it.", startup_settings.hotkey);
+                }
             }
             // Same real registration as the dictation hotkey, for the
             // separate undo-paste binding — `UNDO_SHORTCUT` is what the
@@ -3461,10 +3735,12 @@ pub fn run() {
                 use tauri::tray::TrayIconBuilder;
 
                 let dictate_item = MenuItem::with_id(app, "dictate_now", "Dictate Now", true, None::<&str>)?;
+                let pause_item = MenuItem::with_id(app, "pause", "Pause Ivy for 1 hour", true, None::<&str>)?;
                 let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
                 let separator = PredefinedMenuItem::separator(app)?;
                 let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-                let tray_menu = Menu::with_items(app, &[&dictate_item, &settings_item, &separator, &quit_item])?;
+                let tray_menu = Menu::with_items(app, &[&dictate_item, &pause_item, &settings_item, &separator, &quit_item])?;
+                app.manage(PauseMenuItem(pause_item.clone()));
 
                 // `TrayIconBuilder::build` returns a real `TrayIcon` handle
                 // whose `Drop` impl removes the icon from the tray — ending
@@ -3476,7 +3752,7 @@ pub fn run() {
                     .icon(app.default_window_icon().cloned().ok_or("no default window icon")?)
                     .menu(&tray_menu)
                     .show_menu_on_left_click(true)
-                    .tooltip("Ivy — hold Alt+Space anywhere to dictate")
+                    .tooltip("Ivy — offline dictation")
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "dictate_now" => {
                             // Real toggle through the exact same functions the
@@ -3487,6 +3763,13 @@ pub fn run() {
                                 handle_hotkey_up(app);
                             } else {
                                 handle_hotkey_down(app);
+                            }
+                        }
+                        "pause" => {
+                            if is_paused() {
+                                resume_ivy(app.clone());
+                            } else {
+                                let _ = pause_ivy(app.clone(), 60);
                             }
                         }
                         "settings" => {
@@ -3505,32 +3788,61 @@ pub fn run() {
             }
 
             let app_handle = app.handle().clone();
-            let settings = load_settings(&app_handle);
-            let threshold = settings.vram_eviction_threshold;
-            gpu_monitor::start_gpu_monitor(threshold, move || {
-                lite::unload_engine();
-            });
-
-            // Background pre-warm: Load active model into memory/VRAM on startup
-            // so the very first dictation starts instantly without initialization delay.
-            let app_handle_warm = app.handle().clone();
-            std::thread::spawn(move || {
-                let models = models_dir(&app_handle_warm);
-                let prefer_gpu = should_use_gpu(&app_handle_warm);
-                let t_warm = std::time::Instant::now();
-                match lite::engine(&models, !prefer_gpu) {
-                    Ok(eng) => {
-                        let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
-                        // One silent practice pass, so the user's first real dictation doesn't pay the
-                        // one-time GPU pipeline / buffer setup (Yash: "the first reply takes a lot of time").
-                        let _ = eng.transcribe(&vec![0.0; 16_000], &[], std::time::Duration::from_secs(60));
-                        debug_log(&app_handle_warm, &format!("lite engine pre-warmed via {backend} in {}ms (incl. a silent warm-up pass)", t_warm.elapsed().as_millis()));
+            let monitor_app = app_handle.clone();
+            let notice_app = app_handle.clone();
+            gpu_monitor::start_gpu_monitor(
+                move || {
+                    let s = load_settings(&monitor_app);
+                    (s.smart_vram_eviction, s.vram_eviction_threshold, s.hardware_mode == "gpu")
+                },
+                move |event| {
+                    // never pull the model out from under a dictation that's recording or starting
+                    let busy = PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some() || STARTING_DICTATION.load(Ordering::SeqCst);
+                    match event {
+                        gpu_monitor::Event::Sleep if !busy => {
+                            // Full screen (Yash, 2026-10-06): fully unloaded, Alt+Space goes to the game, no overlay.
+                            lite::unload_engine();
+                            set_dictation_key_active(&notice_app, false);
+                            debug_log(&notice_app, "full-screen app in front: asleep (model unloaded, hotkey off)");
+                        }
+                        gpu_monitor::Event::Wake => {
+                            if !is_paused() {
+                                set_dictation_key_active(&notice_app, true);
+                                debug_log(&notice_app, "full screen ended: awake, loading the model again");
+                                prewarm(&notice_app);
+                            }
+                        }
+                        gpu_monitor::Event::GpuBusy(load, threshold) if !busy => {
+                            lite::unload_engine();
+                            debug_log(&notice_app, &format!("GPU busy ({load}% >= {threshold}%): model unloaded, dictating on CPU"));
+                            position_capsule_window(&notice_app);
+                            bridge_capsule_show(&notice_app, true);
+                            let _ = notice_app.emit("ivy://gpu-evicted", serde_json::json!({ "load": load, "threshold": threshold }));
+                        }
+                        _ => return false,
                     }
-                    Err(e) => debug_log(&app_handle_warm, &format!("lite engine pre-warm failed: {e}")),
-                }
-            });
+                    true
+                },
+            );
+
+            // Background pre-warm so the very first dictation starts instantly.
+            prewarm(&app.handle().clone());
 
             if let Some(window) = app.get_webview_window("main") {
+                // Windows rounds the window itself, so the app's box fills it edge to edge: the page's own
+                // rounded corners left black triangles at the corners (Yash, 2026-10-06).
+                #[cfg(windows)]
+                if let Ok(hwnd) = window.hwnd() {
+                    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND};
+                    unsafe {
+                        let _ = DwmSetWindowAttribute(
+                            windows::Win32::Foundation::HWND(hwnd.0),
+                            DWMWA_WINDOW_CORNER_PREFERENCE,
+                            &DWMWCP_ROUND as *const _ as *const core::ffi::c_void,
+                            std::mem::size_of_val(&DWMWCP_ROUND) as u32,
+                        );
+                    }
+                }
                 let close_window = window.clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -3568,12 +3880,26 @@ mod tests {
     }
 
     #[test]
+    fn snippets_only_replace_a_dictation_that_is_just_the_trigger() {
+        let snips = vec![Snippet { trigger: "my email".into(), text: "yash@example.com".into() }];
+        assert_eq!(apply_snippets("My email.", &snips).as_deref(), Some("yash@example.com"));
+        assert_eq!(apply_snippets("  my EMAIL ", &snips).as_deref(), Some("yash@example.com"));
+        assert_eq!(apply_snippets("Check my email.", &snips), None);
+        assert_eq!(apply_snippets("", &snips), None);
+    }
+
+    #[test]
     fn test_validate_settings_valid() {
         let mut settings = SettingsConfig::default();
-        settings.hotkey = "Alt+Space".to_string();
+        settings.hotkey = "Alt + Space".to_string();
         settings.active_tone_preset = "Standard".to_string();
         settings.hardware_mode = "gpu".to_string();
         assert!(validate_settings(&settings).is_ok());
+        settings.hotkey = "Ctrl + Shift".to_string();
+        assert!(validate_settings(&settings).is_ok());
+        // only the two offered keys (a bare "Space" saved by an old picker would eat the spacebar)
+        settings.hotkey = "Space".to_string();
+        assert!(validate_settings(&settings).is_err());
     }
 
     #[test]
@@ -3599,25 +3925,25 @@ mod tests {
         assert!(check_rate_limit(&ts, 50).is_err());
     }
 
-    // Regression test for a real bug: an app with no explicit tone-preset
-    // match used to always fall back to a hardcoded "Standard", silently
-    // ignoring whatever the user picked via the Tone screen's "Make X the
-    // default" button — that setting was persisted and shown with a
-    // "Default" badge but never actually changed real routing.
     #[test]
-    fn tone_for_label_falls_back_to_the_configured_default_not_a_hardcoded_standard() {
+    fn added_apps_keep_their_tone_and_every_other_app_gets_the_clicked_one() {
         let mut settings = SettingsConfig::default();
+        settings.preset_apps.clear();
+        settings.preset_apps.insert("Professional".to_string(), vec!["brave.exe".to_string()]);
+        settings.preset_apps.insert("Casual".to_string(), vec!["WhatsApp.exe".to_string(), "Gmail".to_string()]);
+        settings.active_tone_preset = "Standard".to_string();
+        // .exe entries match the program, whatever the window title says
+        assert_eq!(tone_for_label(&settings, "New Tab - Brave", "brave.exe"), "Professional");
+        assert_eq!(tone_for_label(&settings, "Anything at all", "Brave.EXE"), "Professional");
+        assert_eq!(tone_for_label(&settings, "WhatsApp", "WhatsApp.exe"), "Casual");
+        // a title that merely mentions "brave" isn't brave.exe
+        assert_eq!(tone_for_label(&settings, "brave new world.txt - Notepad", "notepad.exe"), "Standard");
+        // older name entries still match the title
+        assert_eq!(tone_for_label(&settings, "Inbox - Gmail - Google Chrome", "chrome.exe"), "Casual");
+        // clicking a mode changes every app that isn't on a list, at once
         settings.active_tone_preset = "Professional".to_string();
-        // A label that matches none of the (default) preset app lists.
-        assert_eq!(tone_for_label(&settings, "Some Totally Unlisted App"), "Professional");
-
-        settings.active_tone_preset = "Casual".to_string();
-        assert_eq!(tone_for_label(&settings, "Some Totally Unlisted App"), "Casual");
-
-        // An explicit match still wins over the configured default.
-        settings.preset_apps.insert("Professional".to_string(), vec!["Outlook".to_string()]);
-        settings.active_tone_preset = "Casual".to_string();
-        assert_eq!(tone_for_label(&settings, "Outlook"), "Professional");
+        assert_eq!(tone_for_label(&settings, "Untitled - Notepad", "notepad.exe"), "Professional");
+        assert_eq!(tone_for_label(&settings, "WhatsApp", "WhatsApp.exe"), "Casual");
     }
 
     #[test]

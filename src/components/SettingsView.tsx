@@ -11,6 +11,8 @@ interface SettingsViewProps {
 }
 
 const ACCENT_RGB = '255, 107, 0';
+// Two choices only (Yash, 2026-10-06). Ctrl + Shift is watched by modifier_hotkey.rs.
+const DICTATION_KEYS = ['Alt + Space', 'Ctrl + Shift'];
 
 const Row: React.FC<{
   title: string;
@@ -67,7 +69,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   // Which hotkey field is being captured, if any — `null` means neither
   // capture box is open. Shared so only one capture can be active at a time.
-  const [changingHotkeyField, setChangingHotkeyField] = useState<'hotkey' | 'undoPasteHotkey' | 'manualPasteHotkey' | null>(null);
   const [micDropdownOpen, setMicDropdownOpen] = useState(false);
   const [mics, setMics] = useState<string[]>([]);
   const [micsBlocked, setMicsBlocked] = useState(false);
@@ -157,67 +158,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // there is to "grant access" from this screen.
   const grantMicAccess = () => void loadMics();
 
-  // Named-key spellings must match `parse_hotkey` in lib.rs exactly — a
-  // mismatch here (e.g. `e.key.toUpperCase()` producing "ARROWUP" instead
-  // of "ArrowUp") makes the backend fail to parse the saved string, which
-  // used to unregister the real OS hotkey before discovering that (fixed
-  // separately in lib.rs's `apply_hotkey`, register-before-unregister —
-  // but this UI still shouldn't be able to save an unparseable spec).
-  const NAMED_KEYS: Record<string, string> = {
-    ' ': 'Space',
-    Enter: 'Enter',
-    Tab: 'Tab',
-    Backspace: 'Backspace',
-    ArrowUp: 'ArrowUp',
-    ArrowDown: 'ArrowDown',
-    ArrowLeft: 'ArrowLeft',
-    ArrowRight: 'ArrowRight',
-    CapsLock: 'Caps Lock',
-  };
-  const isModifierKey = (key: string) =>
-    key === 'Alt' || key === 'Control' || key === 'Shift' || key === 'Meta';
-
-  const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
-    e.preventDefault();
-    const field = changingHotkeyField;
-    if (!field) return;
-    if (e.key === 'Escape') {
-      setChangingHotkeyField(null);
-      return;
-    }
-    // A modifier alone isn't a complete hotkey yet — wait for the real key
-    // instead of committing "Alt" the instant Alt goes down, which used to
-    // close the capture box before the user ever reached the second key.
-    if (isModifierKey(e.key)) return;
-
-    let mainKey: string | null = null;
-    if (NAMED_KEYS[e.key]) mainKey = NAMED_KEYS[e.key];
-    else if (/^F([1-9]|1[0-2])$/.test(e.key)) mainKey = e.key;
-    else if (/^[a-zA-Z]$/.test(e.key)) mainKey = e.key.toUpperCase();
-    else if (/^[0-9]$/.test(e.key)) mainKey = e.key;
-    else return; // unrecognized key (media keys, IME composition, …) — ignore, keep waiting
-
-    const keys: string[] = [];
-    if (e.altKey) keys.push('Alt');
-    if (e.ctrlKey) keys.push('Ctrl');
-    if (e.shiftKey) keys.push('Shift');
-    if (e.metaKey) keys.push('Cmd');
-
-    // A bare letter/digit with no modifier would register a real
-    // system-wide hotkey on that character alone, swallowing every normal
-    // keystroke of it anywhere on the PC — only Caps Lock is a legitimate
-    // single-key trigger (Right/Left Alt can't be registered as a standalone
-    // hotkey at all: the Windows RegisterHotKey backend this app uses has no
-    // VK mapping for a bare modifier key, confirmed in global-hotkey 0.8.0's
-    // Windows key_to_vk table — isModifierKey() above already filters Alt
-    // out before this point, so this branch never actually saw it anyway).
-    if (keys.length === 0 && /^[A-Z0-9]$/.test(mainKey)) return;
-
-    keys.push(mainKey);
-    onUpdateSettings({ [field]: keys.join(' + ') });
-    setChangingHotkeyField(null);
-  };
-
   // No process restart: the STT engine already reloads itself in the
   // requested mode on the very next dictation (`stt::engine()` compares
   // the loaded engine's `is_gpu` against the setting and swaps if it
@@ -257,7 +197,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <p className="text-[12.5px] text-white/40 mt-1">How Ivy listens, writes, and pastes.</p>
       </header>
 
-      <div className="px-8 pb-10 max-w-2xl">
+      <div className="px-8 pb-10 max-w-2xl w-full mx-auto">
         <div className="pb-2">
           <div className="text-[11px] uppercase tracking-wider text-white/30 mb-1">Appearance</div>
         </div>
@@ -284,130 +224,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           />
         </div>
         <div className="divide-y divide-white/[0.06]">
-          {/* Hotkey */}
           <Row
             title="Dictation shortcut"
-            description="Hold to record, release to paste. Or double-press to start recording hands-free — press once more to stop."
+            description="Hold to record, let go to paste. Press twice quickly for hands-free, and once more to stop."
           >
-            {changingHotkeyField === 'hotkey' ? (
-              <div
-                tabIndex={0}
-                autoFocus
-                onKeyDown={handleHotkeyKeyDown}
-                className="px-3 py-1.5 rounded-xl text-[11.5px] outline-none"
-                style={{
-                  backgroundColor: `rgba(${ACCENT_RGB}, 0.12)`,
-                  border: `1px solid rgba(${ACCENT_RGB}, 0.4)`,
-                  color: `rgb(${ACCENT_RGB})`,
-                }}
-              >
-                Press keys… Esc to cancel
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                {settings.hotkey.split(' + ').map((part) => (
-                  <kbd
-                    key={part}
-                    className="px-2.5 py-1 rounded-lg text-[11px] text-white/85 font-medium"
-                    style={chipStyle}
+            <div className="flex items-center p-1 rounded-xl" style={chipStyle}>
+              {DICTATION_KEYS.map((key) => {
+                const picked = settings.hotkey === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => !picked && onUpdateSettings({ hotkey: key })}
+                    className={`px-3.5 py-1.5 rounded-lg text-[12px] font-medium transition-all ${
+                      picked ? 'text-white' : 'text-white/45 hover:text-white/80'
+                    }`}
+                    style={picked ? { backgroundColor: `rgba(${ACCENT_RGB}, 0.25)`, border: `1px solid rgba(${ACCENT_RGB}, 0.5)` } : undefined}
                   >
+                    {key}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+          {(
+            [
+              ['Alt + V', 'Paste held-back text', "No text box when you finished speaking? Ivy keeps your words in its own clipboard (your normal clipboard is never touched). Click where you want them and press Alt + V."],
+              ['Alt + B', 'Undo paste', 'Ivy pasted in the wrong place? Press Alt + B to take its last paste back out.'],
+            ] as const
+          ).map(([keys, title, description]) => (
+            <Row key={keys} title={title} description={description}>
+              <div className="flex items-center gap-1.5">
+                {keys.split(' + ').map((part) => (
+                  <kbd key={part} className="px-2.5 py-1 rounded-lg text-[11px] text-white/85 font-medium" style={chipStyle}>
                     {part}
                   </kbd>
                 ))}
               </div>
-            )}
-
-            <button
-              id="change-hotkey-btn"
-              onClick={() => setChangingHotkeyField(changingHotkeyField === 'hotkey' ? null : 'hotkey')}
-              className="px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.11] text-[12px] font-medium text-white/85 transition-colors duration-150"
-            >
-              {changingHotkeyField === 'hotkey' ? 'Cancel' : 'Change'}
-            </button>
-          </Row>
-
-          {/* Undo-paste shortcut */}
-          <Row
-            title="Undo paste shortcut"
-            description="Reverts the last thing Ivy pasted — sends Undo into that app and restores your previous clipboard."
-          >
-            {changingHotkeyField === 'undoPasteHotkey' ? (
-              <div
-                tabIndex={0}
-                autoFocus
-                onKeyDown={handleHotkeyKeyDown}
-                className="px-3 py-1.5 rounded-xl text-[11.5px] outline-none"
-                style={{
-                  backgroundColor: `rgba(${ACCENT_RGB}, 0.12)`,
-                  border: `1px solid rgba(${ACCENT_RGB}, 0.4)`,
-                  color: `rgb(${ACCENT_RGB})`,
-                }}
-              >
-                Press keys… Esc to cancel
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                {settings.undoPasteHotkey.split(' + ').map((part) => (
-                  <kbd
-                    key={part}
-                    className="px-2.5 py-1 rounded-lg text-[11px] text-white/85 font-medium"
-                    style={chipStyle}
-                  >
-                    {part}
-                  </kbd>
-                ))}
-              </div>
-            )}
-
-            <button
-              onClick={() => setChangingHotkeyField(changingHotkeyField === 'undoPasteHotkey' ? null : 'undoPasteHotkey')}
-              className="px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.11] text-[12px] font-medium text-white/85 transition-colors duration-150"
-            >
-              {changingHotkeyField === 'undoPasteHotkey' ? 'Cancel' : 'Change'}
-            </button>
-          </Row>
-
-          {/* Manual-paste shortcut */}
-          <Row
-            title="Paste held-back text shortcut"
-            description="When Ivy can't find a text field, it never touches your real clipboard — it holds the transcript instead. Press this to paste it into whatever's focused now."
-          >
-            {changingHotkeyField === 'manualPasteHotkey' ? (
-              <div
-                tabIndex={0}
-                autoFocus
-                onKeyDown={handleHotkeyKeyDown}
-                className="px-3 py-1.5 rounded-xl text-[11.5px] outline-none"
-                style={{
-                  backgroundColor: `rgba(${ACCENT_RGB}, 0.12)`,
-                  border: `1px solid rgba(${ACCENT_RGB}, 0.4)`,
-                  color: `rgb(${ACCENT_RGB})`,
-                }}
-              >
-                Press keys… Esc to cancel
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                {settings.manualPasteHotkey.split(' + ').map((part) => (
-                  <kbd
-                    key={part}
-                    className="px-2.5 py-1 rounded-lg text-[11px] text-white/85 font-medium"
-                    style={chipStyle}
-                  >
-                    {part}
-                  </kbd>
-                ))}
-              </div>
-            )}
-
-            <button
-              onClick={() => setChangingHotkeyField(changingHotkeyField === 'manualPasteHotkey' ? null : 'manualPasteHotkey')}
-              className="px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.11] text-[12px] font-medium text-white/85 transition-colors duration-150"
-            >
-              {changingHotkeyField === 'manualPasteHotkey' ? 'Cancel' : 'Change'}
-            </button>
-          </Row>
-
+            </Row>
+          ))}
           {/* Microphone */}
           <Row title="Microphone" description="The input Ivy records from.">
             {micsBlocked || mics.length === 0 ? (
@@ -493,7 +347,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     {hardwareStatus.activeEngine === 'gpu'
                       ? 'GPU Active'
                       : hardwareStatus.activeEngine === 'evicted'
-                      ? 'VRAM Evicted (Gaming)'
+                      ? 'On CPU (GPU busy)'
                       : 'CPU Mode'}
                   </span>
                   {hardwareStatus.onBattery && (
@@ -569,7 +423,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <span className="truncate">{hardwareStatus.gpuName || 'System Graphics Adapter'}</span>
               </div>
               <div className="flex items-center gap-3 shrink-0">
-                <span className="text-white/40">Load:</span>
+                <span className="text-white/40">Other apps' load:</span>
                 <span className="font-mono text-white/80 tabular-nums">
                   {hardwareStatus.gpuUsagePercent}%
                 </span>
@@ -591,8 +445,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           {/* Smart VRAM Eviction */}
           <Row
-            title="Smart VRAM Eviction (Gaming & 3D)"
-            description={`Automatically unloads models from VRAM when games or 3D applications hit >= ${settings.vramEvictionThreshold}% GPU usage. Frees 100% of graphics memory while keeping dictation hotkeys active.`}
+            title="Smart GPU sharing (games, videos & 3D)"
+            description={`While a game or full-screen video player is in front, Ivy sleeps: model unloaded, Alt+Space left to the game. Full-screen browsers and terminals don't count. When other programs keep the GPU at ${settings.vramEvictionThreshold}% or more, Ivy switches to CPU (a short note shows on the overlay) and returns to the GPU when it calms down.`}
           >
             <button
               id="smart-vram-eviction-toggle"
@@ -624,7 +478,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               actually change it from its 90% default anywhere in this UI. */}
           {settings.smartVramEviction && (
             <SliderRow
-              title="Eviction threshold"
+              title="GPU usage limit"
               value={settings.vramEvictionThreshold}
               unit="%"
               min={50}

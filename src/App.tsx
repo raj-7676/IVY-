@@ -8,6 +8,7 @@ import { DictionaryView } from './components/DictionaryView';
 import { ToneView } from './components/ToneView';
 import { SettingsView } from './components/SettingsView';
 import { FirstRunView } from './components/FirstRunView';
+import { PauseControl } from './components/PauseControl';
 import { GlassParticles } from './components/GlassParticles';
 import { IvyLaunchIntro } from './components/IvyLaunchIntro';
 import { IvyLogo } from './components/IvyLogo';
@@ -43,12 +44,16 @@ export default function App() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const settingsLoaded = useRef(false);
   const settingsRef = useRef<SettingsConfig>(INITIAL_SETTINGS);
+  // What the backend last accepted (the revert target if a save fails), and the pending save.
+  const savedSettingsRef = useRef<SettingsConfig>(INITIAL_SETTINGS);
+  const saveTimer = useRef<number | undefined>(undefined);
 
   // Real, persisted settings + history + decoupled stats from the Rust backend.
   useEffect(() => {
     invoke<SettingsConfig>('get_settings')
       .then((s) => {
         settingsRef.current = s;
+        savedSettingsRef.current = s;
         setSettings(s);
         settingsLoaded.current = true;
         if (s.onboardingCompleted) {
@@ -126,19 +131,28 @@ export default function App() {
     // Merged from a ref, not inside a setState updater: React can defer an
     // updater until the next render, which left `merged` null here and
     // silently skipped the save while the screen still showed the change.
-    const previous = settingsRef.current;
-    const merged = { ...previous, ...newSettings };
+    const merged = { ...settingsRef.current, ...newSettings };
     settingsRef.current = merged;
     setSettings(merged);
     if (!settingsLoaded.current) return;
-    invoke('save_settings', { settings: merged }).catch((err) => {
-      // A real failure here (most commonly: the new hotkey is already
-      // taken by something else) must not leave the UI showing a
-      // setting that was never actually applied — revert and say so.
-      settingsRef.current = previous;
-      setSettings(previous);
-      setSettingsError(typeof err === 'string' ? err : 'Could not save that setting.');
-    });
+    // One save per burst of changes: dragging a slider fires many updates, and the backend refuses
+    // saves closer than 100ms apart ("rate limit exceeded"), which used to revert the slider.
+    clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      const toSave = settingsRef.current;
+      invoke('save_settings', { settings: toSave })
+        .then(() => {
+          savedSettingsRef.current = toSave;
+        })
+        .catch((err) => {
+          // A real failure here (most commonly: the new hotkey is already
+          // taken by something else) must not leave the UI showing a
+          // setting that was never actually applied — revert and say so.
+          settingsRef.current = savedSettingsRef.current;
+          setSettings(savedSettingsRef.current);
+          setSettingsError(typeof err === 'string' ? err : 'Could not save that setting.');
+        });
+    }, 150);
   }, []);
 
   return (
@@ -168,7 +182,7 @@ export default function App() {
           'inset 0 -2px 6px 0 rgba(0,0,0,0.6)',
         ].join(', '),
       }}
-      className="relative flex flex-col h-screen w-screen border rounded-3xl overflow-hidden transition-colors duration-300 antialiased select-none"
+      className="relative flex flex-col h-screen w-screen border overflow-hidden transition-colors duration-300 antialiased select-none"
     >
       {/* Cinematic Launch Intro with smooth zoom-out-and-dock */}
       {showIntro && (
@@ -197,6 +211,7 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          <PauseControl />
           <div className="hidden md:flex items-center gap-1.5 text-[11px] text-white/45">
             <span>Hold</span>
             <kbd className="px-1.5 py-0.5 rounded-md bg-white/[0.07] border border-white/[0.1] text-white/80 text-[10px]">

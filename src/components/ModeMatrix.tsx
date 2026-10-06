@@ -14,7 +14,7 @@ const COMBOS: Record<HardwareMode, ModeCombo> = {
     points: [
       'Runs on your graphics card (NVIDIA, AMD or Intel, through Vulkan).',
       'A 1-minute dictation is ready in about 2 seconds; a short one in a fraction of a second.',
-      'On battery or while a game fills the graphics memory, Ivy switches to CPU by itself.',
+      'On battery, or when other apps keep the GPU busy, Ivy switches to CPU by itself. During games and full-screen video it steps aside.',
     ],
   },
   cpu: {

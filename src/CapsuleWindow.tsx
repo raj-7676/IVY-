@@ -21,6 +21,7 @@ export default function CapsuleWindow() {
   const [manualPasteHotkey, setManualPasteHotkey] = useState<string>('Alt + V');
   const [touchUpStatus, setTouchUpStatus] = useState<'offer' | 'loading' | 'done' | 'clean' | 'error'>('offer');
   const idleTimer = useRef<number | undefined>(undefined);
+  const [notice, setNotice] = useState('');
 
   // A real OS-level hide, not just rendering nothing — WebView2 can leave a
   // faint rectangular background/shadow visible even over fully transparent
@@ -92,6 +93,13 @@ export default function CapsuleWindow() {
     });
     // Fires once, 90s after a real autostart launch — see `setup()` in
     // lib.rs. Never on a manual launch or the first-ever run.
+    // Smart eviction moved dictation to CPU because other programs were loading the GPU (gpu_monitor.rs).
+    const unlistenGpuEvicted = listen<{ load: number; threshold: number }>('ivy://gpu-evicted', (e) => {
+      clearTimeout(idleTimer.current);
+      setNotice(`GPU above your ${e.payload.threshold}% limit · Ivy switched to CPU`);
+      setMode('gpu-evicted');
+      idleTimer.current = window.setTimeout(goIdle, 3500);
+    });
     const unlistenBackgroundReady = listen('ivy://background-ready', () => {
       clearTimeout(idleTimer.current);
       setMode('launched');
@@ -136,6 +144,7 @@ export default function CapsuleWindow() {
       unlistenUndo.then((f) => f());
       unlistenManualPaste.then((f) => f());
       unlistenBackgroundReady.then((f) => f());
+      unlistenGpuEvicted.then((f) => f());
       unlistenComplete.then((f) => f());
       clearTimeout(idleTimer.current);
     };
@@ -190,6 +199,7 @@ export default function CapsuleWindow() {
       manualPasteHotkey={manualPasteHotkey}
       canRetry={!!sessionId}
       touchUpStatus={touchUpStatus}
+      notice={notice}
       onRetry={retry}
       onCancel={cancel}
       onTouchUp={touchUp}
