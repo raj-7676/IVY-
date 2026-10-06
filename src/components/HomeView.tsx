@@ -122,13 +122,13 @@ export const HomeView: React.FC<HomeViewProps> = ({ sessions, userStats, hotkey,
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-[14px] font-semibold text-white">First-Time User Experience</h3>
+                <h3 className="text-[14px] font-semibold text-white">Setup guide</h3>
                 <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-[#FF6B00]/20 border border-[#FF6B00]/40 text-[#FFA133]">
                   Interactive Wizard
                 </span>
               </div>
               <p className="text-[12px] text-white/50 mt-1 max-w-lg leading-relaxed">
-                Test the 7-stage onboarding wizard: custom hotkey selector, smart clipboard fallback, dictation mode, Touch Up, voice test with <kbd className="font-mono text-white/75 bg-white/[0.08] px-1 rounded text-[11px]">{hotkey}</kbd>, self-correction demo, and privacy.
+                Walk through setup again: pick your dictation key, GPU or CPU, Touch Up, a voice test with <kbd className="font-mono text-white/75 bg-white/[0.08] px-1 rounded text-[11px]">{hotkey}</kbd>, self-correction demo, and privacy.
               </p>
             </div>
           </div>
@@ -144,7 +144,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ sessions, userStats, hotkey,
                 border: '1px solid rgba(255, 161, 51, 0.4)',
               }}
             >
-              <span>Test Onboarding Flow</span>
+              <span>Open setup guide</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

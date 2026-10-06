@@ -10,6 +10,12 @@ cloud. Your voice never leaves your PC.
 
 **[Download Ivy for Windows](https://github.com/raj-7676/IVY-/releases/latest)**
 
+![Ivy's main window](docs/ivy-main.png)
+
+While you talk, a small bar shows the time, the tone in use and the app you're typing into:
+
+![Ivy's dictation bar](docs/ivy-capsule.png)
+
 ---
 
 ## What makes Ivy different
