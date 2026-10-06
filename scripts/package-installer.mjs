@@ -5,7 +5,8 @@
 // At install time, src-tauri/installer/hooks.nsh copies the model files from next to the setup exe into
 // $INSTDIR\models\ivy-lite. Upload every file in the folder to the GitHub release; users download them
 // all into one folder and run the setup.
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +51,17 @@ for (const f of MODEL_FILES) {
   console.log(`Copying ${f}...`);
   copyFileSync(path.join(liteDir, f), path.join(out, f));
 }
+// The model is Apache-2.0: its license travels with it.
+copyFileSync(path.join(root, 'LICENSES', 'Apache-2.0.txt'), path.join(out, 'MODEL-LICENSE-Apache-2.0.txt'));
+
+console.log('Hashing (SHA256SUMS.txt)...');
+const sums = [];
+for (const f of readdirSync(out).filter((f) => f !== 'SHA256SUMS.txt')) {
+  const h = createHash('sha256');
+  for await (const chunk of createReadStream(path.join(out, f))) h.update(chunk);
+  sums.push(`${h.digest('hex')}  ${f}`);
+}
+writeFileSync(path.join(out, 'SHA256SUMS.txt'), sums.join('\n') + '\n');
 
 console.log(`\nRelease folder ready (upload every file to the GitHub release):\n  ${out}`);
 for (const f of readdirSync(out)) {

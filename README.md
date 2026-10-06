@@ -1,29 +1,113 @@
 # Ivy
 
-A standalone, fully offline, open-source voice dictation app for Windows.
+**Talk, and clean text appears wherever your cursor is. Fully offline, free and open source, for Windows.**
 
-Hold a hotkey, talk, get clean text pasted wherever your cursor is — the
-same idea as Wispr Flow, but 100% local: no account, no subscription, no
-network call, ever. Speech-to-text and cleanup both run on your own
-machine.
+Hold a key, speak naturally, let go. Ivy turns your speech into clean, ready-to-send text and pastes it
+into whatever you were typing in: email, chat, documents, code editors, browsers, anything.
 
-- **Hotkey:** hold `Alt + Space` (customizable in Settings), speak, release.
-- **One model:** Ivy lite, Qwen3-ASR-1.7B (Apache-2.0) fine-tuned by the Ivy lab to hear speech and write clean text in one pass, with your self-corrections ("no wait", "sorry, I mean") already applied. Runs through `llama.cpp` on your graphics card (Vulkan: NVIDIA, AMD, Intel) or on any CPU. A 1-minute dictation takes about 2 s on GPU and 10-20 s on CPU.
-- **Tones:** Casual (texting style: your words as spoken, no full stops, a sentence per line), Standard (slang written out), Professional (no contractions, slang, chat words or exclamation marks). Click one on the Tone screen and it applies at once; programs you add under a mode (pick their .exe, e.g. brave.exe) always use that mode. Deterministic rulebooks also format spoken commands, numbers (big round amounts as "18 lakhs" / "2 million"), tech terms and typography, plus your personal dictionary.
-- **Touch Up:** after a paste, one click fixes misspelled words (offline dictionary; never rephrases).
-- **History & Privacy:** every dictation and its audio are kept strictly locally and automatically purged after 24 hours (daily retention). Sensitive voice audio and chat history can also be manually purged at any time.
-- **Progress Without Compromise:** user productivity metrics (day streaks, words dictated, words per minute, and the 14-day activity chart) are decoupled from sensitive transcripts and stored as anonymous scalar aggregates (`stats.json`). Clearing your chat or voice history never wipes your streak or sets your stats back to zero.
-- **Network:** none. The packaged app makes zero network calls at runtime — the model ships next to the installer and is copied in at install time, never fetched on launch.
+Everything happens on your own computer. No account, no subscription, no internet connection, no
+cloud. Your voice never leaves your PC.
 
-## Security & Privacy
+**[Download Ivy for Windows](https://github.com/raj-7676/IVY-/releases/latest)**
 
-IVY is engineered under a zero-trust, zero-cloud architecture:
-- **Zero Cloud Leakage:** All speech recognition (the Ivy lite GGUF model) runs entirely in-process on your local CPU/GPU.
-- **Audio RAM Zeroization:** Raw PCM audio sample buffers in memory (`Vec<f32>`) are actively overwritten with zeros (`fill(0.0)`) upon completion or cancellation to prevent residual audio in unallocated memory.
-- **Daily Auto-Purge:** Audio recordings (`.wav`) and session text transcripts are automatically deleted after 24 hours.
-- **Strict IPC Validation:** Native Tauri IPC handlers validate all session identifiers to prevent directory traversal attacks.
-- **Automated Open-Source Audits:** Continuous integration runs `cargo audit`, `npm audit`, Dependabot automated dependency scanning, and GitHub CodeQL static analysis.
-- For our vulnerability disclosure program and threat model, see [**`SECURITY.md`**](SECURITY.md).
+---
+
+## What makes Ivy different
+
+**It writes what you *meant*, not just what you said.**
+People change their minds mid-sentence. Most dictation apps type every word, and you fix it by
+hand. Ivy understands self-corrections and writes the final version. The kind of thing it handles:
+
+| You say | Ivy types |
+|---|---|
+| "Let's meet on Tuesday, sorry, I mean Thursday." | Let's meet on Thursday. |
+| "Book a table for four, actually make it six." | Book a table for six. |
+| "Tell Sam the call is at 3, no wait, 4 PM." | Tell Sam the call is at 4 PM. |
+| "Um, so, I I think we should, uh, ship it." | I think we should ship it. |
+
+It also drops fillers (um, uh), removes stutters and repeated words, adds punctuation and capital
+letters, and writes numbers, money, times and dates the way you'd type them.
+
+**One small model does all of it.** Ivy's speech model hears and cleans up in a single pass. There's
+no second AI rewriting your text afterwards, so it stays fast and keeps your words.
+
+**Truly offline.** The app makes zero network calls. The model is installed from the download
+folder, so Ivy never phones home, not even for updates.
+
+**Built for real voices.** The model was trained on many hours of real people speaking (noisy rooms,
+cheap microphones, many accents) with human-written transcripts, plus thousands of dictation
+paragraphs full of corrections.
+
+---
+
+## Features
+
+- **Hold to talk:** hold **Alt + Space** (or **Ctrl + Shift**, your choice in Settings), speak, release.
+- **Hands-free:** double-tap the key to start recording, tap once more to stop. Good for long dictations (up to 5 minutes; a "10 s left" badge warns you).
+- **Three tones:**
+  - **Casual:** texting style. Your words as spoken, no full stops, one sentence per line.
+  - **Standard:** clean, normal writing. Slang is written out.
+  - **Professional:** formal. No contractions, slang, chat words or exclamation marks.
+- **Per-app tones:** add apps to a tone (for example Slack to Casual and Outlook to Professional), and Ivy switches automatically.
+- **Touch Up:** after a paste, one click fixes spelling mistakes. It only corrects misspelled words and never rewrites your sentences.
+- **Personal dictionary:** teach Ivy names, brands and jargon so it spells them your way.
+- **Snippets:** say a short trigger phrase and Ivy pastes a saved block of text (an address, a signature, a template).
+- **Smart number formatting:** "500 rupees" becomes ₹500. Big round amounts are written the readable way, for example "18 lakhs", "2.5 crores" or "2 million".
+- **Quick keys:** **Alt + V** pastes your last dictation again. **Alt + B** undoes the last paste.
+- **History:** your recent dictations, with their audio, are kept on your PC so you can replay or copy them.
+- **Pause:** turn Ivy off for an hour (or up to 24 hours) from the title bar or the tray icon.
+- **GPU or CPU:** runs on any graphics card (NVIDIA, AMD or Intel) or on the processor alone. On battery it switches to CPU to save power.
+- **Plays nice with games:** when a game or full-screen video is in front, Ivy goes to sleep, frees the graphics card and leaves your keys to the game. If another program is working the graphics card hard, Ivy moves to the CPU until it calms down.
+- **Quiet microphone friendly:** Ivy boosts soft recordings automatically.
+
+## Privacy
+
+- **No internet, ever.** Speech recognition and cleanup run entirely on your PC.
+- **Automatic clean-up:** recordings and transcripts are deleted after 24 hours. **Clear all** in History deletes them immediately.
+- **Not saved in your clipboard history:** Ivy's pastes are kept out of Windows' clipboard history (Win + V) and clipboard cloud sync.
+- **Memory wiped:** audio in memory is overwritten with zeros once your dictation is done.
+- **Your stats stay, your words don't:** streaks and word counts are stored as plain numbers, separate from your transcripts.
+- **Uninstall asks first:** the uninstaller offers to delete all Ivy data from your PC.
+
+See [SECURITY.md](SECURITY.md) for the security details.
+
+---
+
+## Installing
+
+Ivy installs **FitGirl-repack style**: a small setup file plus the model files, all in one folder.
+
+1. Open the **[latest release](https://github.com/raj-7676/IVY-/releases/latest)** and download **all** of these files into the **same folder**:
+   - `Ivy_0.1.4_x64-setup.exe` (the installer)
+   - `ivy-lite-Q8_0.gguf` (the speech model, 1.8 GB)
+   - `mmproj-ivy-lite-f16.gguf` (the part of the model that listens, 0.6 GB)
+2. Run `Ivy_0.1.4_x64-setup.exe`. It installs Ivy, copies the model in, and asks whether to use your graphics card (GPU) or processor (CPU).
+3. Ivy opens with a short setup wizard that tests your microphone. Then hold **Alt + Space** and talk.
+
+The model is one model stored as two files, because GitHub allows at most 2 GB per file.
+After installing, you can delete the downloaded folder.
+
+**"Windows protected your PC"?** Ivy is new and not code-signed yet, so Windows SmartScreen may warn
+you. Click **More info**, then **Run anyway**. All the code is here, so anyone can check what it does.
+
+### System requirements
+
+- Windows 10 or 11, 64-bit (tested on Windows 11). Ivy uses Microsoft Edge WebView2, which Windows 11 already has; on an older Windows 10 the installer may download it once.
+- About 3 GB of free disk space
+- A microphone
+- Optional: a graphics card with Vulkan support (most NVIDIA, AMD and Intel GPUs) for faster results
+
+### How fast is it?
+
+Measured on a laptop with an RTX 4060:
+
+| Length of speech | GPU | CPU only |
+|---|---|---|
+| 5 seconds | about 0.3 s | about 2-3 s |
+| 30 seconds | about 0.5 s | about 5-10 s |
+| 1 minute | about 2 s | about 10-20 s |
+
+---
 
 ## Building from source
 
@@ -31,37 +115,38 @@ IVY is engineered under a zero-trust, zero-cloud architecture:
 
 - [Rust](https://rustup.rs/) (stable) and the [Tauri v2 prerequisites for Windows](https://v2.tauri.app/start/prerequisites/) (MSVC Build Tools, WebView2)
 - [Node.js](https://nodejs.org/) 18+
-- CMake, Ninja, and LLVM (for `libclang.dll`) on `PATH` — needed to build `llama.cpp` bindings. If you have Visual Studio 2022 Build Tools installed, CMake/Ninja usually already ship under `...\Common7\IDE\CommonExtensions\Microsoft\CMake\`; LLVM can be installed with `winget install LLVM.LLVM`.
-- The [Vulkan SDK](https://vulkan.lunarg.com/) (sets `VULKAN_SDK`) — `llama.cpp` is built with its Vulkan GPU backend.
-- *Windows path length recommendation:* The nested Vulkan shader build in `llama.cpp` generates deeply nested files. If your clone path is deep, you may encounter Windows' 260-character path limit (`MAX_PATH`). To ensure clean builds, point Cargo's build directory to a short path before building:
+- CMake, Ninja, and LLVM (for `libclang.dll`) on `PATH`, needed to build the `llama.cpp` bindings. Visual Studio 2022 Build Tools usually ship CMake/Ninja under `...\Common7\IDE\CommonExtensions\Microsoft\CMake\`; LLVM installs with `winget install LLVM.LLVM`.
+- The [Vulkan SDK](https://vulkan.lunarg.com/) (sets `VULKAN_SDK`); `llama.cpp` is built with its Vulkan GPU backend.
+- Windows' 260-character path limit can break the nested Vulkan shader build. Point Cargo at a short folder first:
   `$env:CARGO_TARGET_DIR = "C:\ivytgt"` (PowerShell) or `set CARGO_TARGET_DIR=C:\ivytgt` (cmd).
 
 ```bash
 npm install
-npm run setup-models   # downloads Ivy's lite model (~2.4 GB) from the GitHub release, once
+npm run setup-models   # downloads Ivy's model (~2.4 GB) from the GitHub release, once
 npm run tauri dev      # real hotkey, real transcription, dev build
 ```
 
-To build a release binary or installer:
+To build a release:
 
 ```bash
-npm run build
-npx tauri build --no-bundle   # produces release/app.exe in Cargo's target folder
-# or, for the release folder (setup exe + the two model files, each under GitHub's 2 GB limit):
-npm run package-installer
+npx tauri build --no-bundle   # just the app exe, in Cargo's target folder
+npm run package-installer     # the full release folder: setup exe + the two model files
 ```
 
-Never run a bare `cargo build` in `src-tauri/` for a binary you intend to
-actually use — it skips Tauri's build pipeline and the resulting exe will
-try to load the dev server URL instead of the bundled frontend. Always go
-through `npm run tauri dev` / `npx tauri build`.
+Always build through `npm run tauri dev` / `npx tauri build`. A bare `cargo build` skips Tauri's
+pipeline, and the exe will look for the dev server instead of the bundled interface.
 
-## Installing
+Tests: `cargo test --lib -- --test-threads=1` inside `src-tauri`.
 
-Download every file from the release into one folder (the setup exe plus `ivy-lite-Q8_0.gguf` and
-`mmproj-ivy-lite-f16.gguf`) and run the setup. It copies the model in and asks whether to run on GPU or CPU.
+More detail: [ARCHITECTURE.md](ARCHITECTURE.md) (how it fits together), [RULEBOOKS.md](RULEBOOKS.md)
+(the formatting and tone rules), [IVY.md](IVY.md) (full engineering notes).
+
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The model is Qwen3-ASR-1.7B (Apache-2.0) fine-tuned by the Ivy lab. Touch Up's
-word list is SymSpell's English frequency dictionary (MIT, `src-tauri/data/en-80k.LICENSE.txt`).
+Ivy is **MIT-licensed**: use it, change it, share it or build on it, including commercially. See
+[LICENSE](LICENSE).
+
+The speech model is a fine-tune of Qwen3-ASR-1.7B (Apache 2.0). Credits for the model, libraries and
+data are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
