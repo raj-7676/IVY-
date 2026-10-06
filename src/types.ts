@@ -16,9 +16,6 @@ export interface DictationSession {
   audioDuration: number;
   /** Absolute path to the saved recording, or "" if none was kept. */
   audioPath: string;
-  /** Real, opt-in summary — only present once the user explicitly asked
-   *  History to summarize this transcript. Never auto-generated. */
-  summary?: string;
   /** Short auto-generated title, filled in by a background pass after the
    *  dictation has already pasted. Absent until that finishes — fall back
    *  to `preview` as the row headline until it does. */
@@ -45,23 +42,18 @@ export interface HardwareStatus {
   onBattery: boolean;
 }
 
-export type DictationMode = 'speed' | 'accuracy';
-
 export interface SettingsConfig {
   hotkey: string;
   activeTonePreset: TonePreset;
   presetApps: Record<TonePreset, string[]>;
   personalDictionary: string[];
-  cleanupPass: boolean;
-  /** Speed (<0.1s core rule cleaner) vs Accuracy (instant full 50+ deterministic rule set; on-demand Touch Up). */
-  dictationMode: DictationMode;
   selectedMic: string;
   availableMics: string[];
   /** Main window glass background opacity, 30-95 (%). */
   glassOpacity: number;
   /** Main window backdrop blur, 12-50 (px). */
   glassBlur: number;
-  /** Compute acceleration: GPU (DirectML speech recognition) or CPU (processor speech recognition; 0% VRAM). */
+  /** Where Ivy's lite model runs: GPU (graphics card, through Vulkan) or CPU (any PC; no graphics memory). */
   hardwareMode: HardwareMode;
   /** Automatically unload models from VRAM when GPU usage >= threshold (e.g. gaming). */
   smartVramEviction: boolean;
@@ -82,8 +74,6 @@ export interface SettingsConfig {
   manualPasteHotkey: string;
   /** True when user has completed or dismissed the initial onboarding wizard. */
   onboardingCompleted?: boolean;
-  /** Active transcription engine: 'voxtral' (default, end-to-end multimodal) | 'whisper' (legacy fallback). */
-  engine?: string;
 }
 
 export interface UserStats {

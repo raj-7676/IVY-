@@ -9,11 +9,9 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod audio;
-mod cleanup;
 mod rulebooks;
-pub(crate) mod stt;
 pub(crate) mod gpu_monitor;
-pub mod voxtral;
+mod spellcheck;
 pub mod lite;
 
 #[cfg(windows)]
@@ -65,7 +63,6 @@ fn is_dictation_cancelled(id: u64) -> bool {
 // Rate limiting and concurrency guards across Tauri IPC endpoints
 static LAST_SETTINGS_SAVE: AtomicU64 = AtomicU64::new(0);
 static LAST_PASTE_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
-static SUMMARIZING: AtomicBool = AtomicBool::new(false);
 static TOUCHING_UP: AtomicBool = AtomicBool::new(false);
 static RETRYING: AtomicBool = AtomicBool::new(false);
 
@@ -161,10 +158,12 @@ static CURRENT_PRESS_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 // whatever press comes next, no separate expiry needed.
 static LAST_TAP: Mutex<Option<Instant>> = Mutex::new(None);
 // A release sooner than this was a tap, not a deliberate hold — real
-// speech essentially never finishes in under 300ms, so nothing genuine is
+// speech essentially never finishes in under 400ms, so nothing genuine is
 // lost by treating anything shorter as a possible double-press half.
-const TAP_THRESHOLD_MS: u64 = 300;
-const DOUBLE_PRESS_WINDOW_MS: u64 = 400;
+// Widened 2026-10-06 from 300/400 ms on Yash's real timings: a 312 ms tap counted as a hold, and
+// a two-key chord (Alt+Space) is slower to repeat than a mouse double-click (Windows default 500 ms).
+const TAP_THRESHOLD_MS: u64 = 400;
+const DOUBLE_PRESS_WINDOW_MS: u64 = 600;
 
 // What a real paste actually overwrote — captured only when `paste_text`
 // sent a genuine Ctrl+V into a real foreground window (the clipboard-only
@@ -226,16 +225,8 @@ fn default_manual_paste_hotkey() -> String {
     "Alt + V".to_string()
 }
 
-fn default_dictation_mode() -> String {
-    "accuracy".to_string()
-}
-
 fn default_onboarding_completed() -> bool {
     false
-}
-
-fn default_engine() -> String {
-    "voxtral".to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -245,7 +236,6 @@ struct SettingsConfig {
     active_tone_preset: String,
     preset_apps: HashMap<String, Vec<String>>,
     personal_dictionary: Vec<String>,
-    cleanup_pass: bool,
     selected_mic: String,
     available_mics: Vec<String>,
     // `serde(default = ...)` so settings.json files saved before this
@@ -267,12 +257,8 @@ struct SettingsConfig {
     undo_paste_hotkey: String,
     #[serde(default = "default_manual_paste_hotkey")]
     manual_paste_hotkey: String,
-    #[serde(default = "default_dictation_mode")]
-    dictation_mode: String,
     #[serde(default = "default_onboarding_completed")]
     onboarding_completed: bool,
-    #[serde(default = "default_engine")]
-    engine: String,
 }
 
 impl Default for SettingsConfig {
@@ -304,7 +290,6 @@ impl Default for SettingsConfig {
             active_tone_preset: "Standard".to_string(),
             preset_apps,
             personal_dictionary: vec![],
-            cleanup_pass: true,
             // Empty means "system default input device" — resolved for
             // real by audio::Recorder::start, never a placeholder name.
             selected_mic: String::new(),
@@ -317,9 +302,7 @@ impl Default for SettingsConfig {
             launch_at_startup: default_launch_at_startup(),
             undo_paste_hotkey: default_undo_paste_hotkey(),
             manual_paste_hotkey: default_manual_paste_hotkey(),
-            dictation_mode: default_dictation_mode(),
             onboarding_completed: default_onboarding_completed(),
-            engine: default_engine(),
         }
     }
 }
@@ -350,11 +333,6 @@ struct DictationSession {
     // audio itself is always inspectable — never just a claimed transcript.
     #[serde(default)]
     audio_path: String,
-    // Real, opt-in summary — only present once the user explicitly asks
-    // History to summarize a long transcript (see `summarize_transcript`).
-    // Never generated as part of the live dictation pipeline.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    summary: Option<String>,
     // Short auto-generated title, filled in by a background thread after
     // the dictation has already pasted — see `spawn_title_generation`.
     // Absent until that thread finishes; the UI falls back to `preview`.
@@ -668,7 +646,7 @@ fn debug_log(app: &tauri::AppHandle, line: &str) {
     }
 }
 
-/// Where the real Voxtral Mini 3B + Whisper model files live. Bundled into the
+/// Where Ivy's model files (models/ivy-lite) live. Bundled into the
 /// installer as a resource directory (see tauri.conf.json) so the shipped
 /// app makes zero network calls; falls back to the repo-relative `models/`
 /// used by `npm run tauri dev` before a resource dir exists.
@@ -1055,10 +1033,6 @@ fn validate_settings(s: &SettingsConfig) -> Result<(), String> {
     if !valid_modes.contains(&s.hardware_mode.as_str()) {
         return Err("invalid hardware mode: must be gpu or cpu".into());
     }
-    let valid_dictation_modes = ["speed", "accuracy"];
-    if !valid_dictation_modes.contains(&s.dictation_mode.as_str()) {
-        return Err("invalid dictation mode: must be speed or accuracy".into());
-    }
     if !(0.0..=100.0).contains(&s.glass_opacity) {
         return Err("glass opacity must be between 0.0 and 100.0".into());
     }
@@ -1124,7 +1098,7 @@ fn save_settings(app: tauri::AppHandle, settings: SettingsConfig) -> Result<(), 
     sync_autostart(&app, settings.launch_at_startup);
 
     write_settings_atomic(&app, &settings)?;
-    debug_log(&app, &format!("settings saved: hardware={} dictation={}", settings.hardware_mode, settings.dictation_mode));
+    debug_log(&app, &format!("settings saved: hardware={}", settings.hardware_mode));
     // Long-lived windows (the capsule) are created once at startup and
     // never poll for settings changes on their own — without this, e.g.
     // changing Dictation Mode here left the capsule's Touch Up gate
@@ -1252,183 +1226,66 @@ fn should_use_gpu(app: &tauri::AppHandle) -> bool {
     settings.hardware_mode == "gpu"
 }
 
-/// Whether Voxtral-backed AI features (Touch Up, History Summarize) are
-/// enabled — checks if the Voxtral models exist in the models directory.
-/// Supported on both GPU and CPU modes.
-fn ai_features_enabled(app: &tauri::AppHandle) -> bool {
-    let models = models_dir(app);
-    let voxtral = models.join("voxtral-ivy");
-    voxtral.join("Voxtral-Mini-3B-2507-Q4_K_M.gguf").exists()
-        && voxtral.join("mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf").exists()
-        && voxtral.join("ivy-lora.gguf").exists()
-}
-
-/// Runs Voxtral (default) or Whisper, then the formatting pass — shared by the
-/// fresh-dictation pipeline and `retry_transcription` so there's one real
-/// implementation of "turn samples into final text", not two that could drift.
+/// Turns samples into final text: the lite engine (Qwen3-ASR-1.7B, fine-tuned by the lab; it resolves
+/// self-corrections itself), then the rulebooks for the chosen tone, then the personal dictionary. Shared by the
+/// fresh-dictation pipeline and `retry_transcription` so there's one real implementation, not two that could drift.
 fn transcribe_and_clean(
     app: &tauri::AppHandle,
     models: &std::path::Path,
     samples: &[f32],
     tone_preset: &str,
-    cleanup_pass: bool,
 ) -> String {
     let prefer_gpu = should_use_gpu(app);
-    // AGC toward -12dBFS so soft voices reach recognizer at a usable level (IVY.md §10).
+    // Quiet microphones: peak-normalise so soft voices reach the model at a usable level (audio::normalize_audio).
     let normalized = audio::normalize_audio(samples);
     let stt_samples = if normalized.is_empty() { samples } else { &normalized };
 
-    // Hallucinations book, stage A (src/rulebooks/hallucinations.rs): check for speech presence.
-    // Whisper needs trimmed non-speech and shortened pauses (voiced_audio); Voxtral and Lite are
-    // trained on raw continuous speech and handle pauses natively — trimming pauses drops the end of
-    // long dictations across chunk boundaries (Task 6 Bug B).
-    let (voiced_audio, voice) = rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
+    // Hallucinations book, stage A (src/rulebooks/hallucinations.rs): no voice -> no text. The model gets the
+    // full audio (not the pause-squeezed copy): squeezing pauses dropped the end of long dictations (Task 6 Bug B).
+    let (_voiced_audio, voice) = rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
     if voice.voiced_secs < 0.25 {
         debug_log(app, &format!("no speech detected ({:.2}s voiced of {:.2}s) — nothing transcribed", voice.voiced_secs, voice.total_secs));
         return String::new();
     }
 
-    let settings = load_settings(app);
-    let dictionary = settings.personal_dictionary;
-    let dictation_mode = settings.dictation_mode;
-
-    if settings.engine.eq_ignore_ascii_case("whisper") {
-        if voiced_audio.is_empty() {
-            return String::new();
-        }
-        let t_stt = std::time::Instant::now();
-        let (raw, actual_gpu) = match stt::engine(models, prefer_gpu) {
-            Ok(engine) => match engine.transcribe_with_vocabulary(&voiced_audio, &dictionary) {
+    let dictionary = load_settings(app).personal_dictionary;
+    let t_lite = std::time::Instant::now();
+    let is_cpu_mode = !prefer_gpu;
+    let raw = match lite::engine(models, is_cpu_mode) {
+        Ok(engine) => {
+            let audio_secs = stt_samples.len() as u64 / 16_000;
+            let timeout = if is_cpu_mode {
+                std::time::Duration::from_secs(60 + audio_secs * 2)
+            } else {
+                std::time::Duration::from_secs(30 + audio_secs / 2)
+            };
+            match engine.transcribe(stt_samples, &dictionary, timeout) {
                 Ok(text) => {
-                    let backend = if engine.is_gpu { "GPU (DirectML)" } else { "CPU" };
-                    let stt_ms = t_stt.elapsed().as_millis();
-                    debug_log(app, &format!("stt ok via {backend} in {stt_ms}ms, {} chars", text.chars().count()));
-                    (text, engine.is_gpu)
+                    let backend = if engine.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                    debug_log(app, &format!("lite ok via {backend} in {}ms, {} chars", t_lite.elapsed().as_millis(), text.chars().count()));
+                    text
                 }
                 Err(e) => {
-                    let stt_ms = t_stt.elapsed().as_millis();
-                    debug_log(app, &format!("stt transcribe() failed in {stt_ms}ms: {e}"));
-                    log::error!("Ivy: transcription failed: {e}");
-                    (String::new(), engine.is_gpu)
-                }
-            },
-            Err(e) => {
-                debug_log(app, &format!("stt engine load failed: {e}"));
-                log::error!("Ivy: STT engine unavailable: {e}");
-                (String::new(), false)
-            }
-        };
-
-        // Hallucinations book, stage B: Whisper's known non-speech phrases, loops, impossible speaking rate.
-        let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
-        if raw.is_empty() {
-            return raw;
-        }
-
-        let is_cpu_mode = !prefer_gpu || !actual_gpu;
-        let text = if cleanup_pass {
-            let t_clean = std::time::Instant::now();
-            let cleaned = cleanup::clean_transcript(models, &raw, tone_preset, is_cpu_mode, &dictation_mode);
-            let clean_ms = t_clean.elapsed().as_millis();
-            let via = "rules";
-            let hw = if is_cpu_mode { "cpu" } else { "gpu" };
-            debug_log(app, &format!("cleanup pass completed in {clean_ms}ms via {via} ({hw}, {dictation_mode} mode)"));
-            cleaned
-        } else {
-            raw
-        };
-        apply_personal_dictionary(&text, &dictionary)
-    } else if settings.engine.eq_ignore_ascii_case("lite") {
-        // Lite engine (Qwen3-ASR-1.7B, fine-tuned by the lab): fast, lightweight speech model.
-        let t_lite = std::time::Instant::now();
-        let is_cpu_mode = !prefer_gpu;
-        let raw = match lite::engine(models, is_cpu_mode) {
-            Ok(engine) => {
-                let audio_secs = stt_samples.len() as u64 / 16_000;
-                let timeout = if is_cpu_mode {
-                    std::time::Duration::from_secs(60 + audio_secs * 2)
-                } else {
-                    std::time::Duration::from_secs(30 + audio_secs / 2)
-                };
-                match engine.transcribe(stt_samples, &dictionary, timeout) {
-                    Ok(text) => {
-                        let backend = if engine.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
-                        let lite_ms = t_lite.elapsed().as_millis();
-                        debug_log(app, &format!("lite ok via {backend} in {lite_ms}ms, {} chars", text.chars().count()));
-                        text
-                    }
-                    Err(e) => {
-                        let lite_ms = t_lite.elapsed().as_millis();
-                        debug_log(app, &format!("lite transcribe() failed in {lite_ms}ms: {e}"));
-                        log::error!("Ivy: Lite transcription failed: {e}");
-                        String::new()
-                    }
+                    debug_log(app, &format!("lite transcribe() failed in {}ms: {e}", t_lite.elapsed().as_millis()));
+                    log::error!("Ivy: Lite transcription failed: {e}");
+                    String::new()
                 }
             }
-            Err(e) => {
-                debug_log(app, &format!("lite engine load failed: {e}"));
-                log::error!("Ivy: Lite engine unavailable: {e}");
-                String::new()
-            }
-        };
-
-        // Hallucinations book, stage B: safety net against loops, impossible speaking rate
-        let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
-        if raw.is_empty() {
-            return raw;
         }
-
-        let tone = rulebooks::Tone::from_label(tone_preset);
-        let formatted = rulebooks::after_voxtral(&raw, tone);
-        apply_personal_dictionary(&formatted, &dictionary)
-    } else {
-        // Voxtral engine (default): end-to-end multimodal model directly outputting clean text with self-corrections resolved.
-        let t_vox = std::time::Instant::now();
-        let is_cpu_mode = !prefer_gpu;
-        let raw = match voxtral::engine(models, is_cpu_mode) {
-            Ok(engine) => {
-                // Scales with length: measured ~0.8 s of work per second of audio on CPU (23 s for a
-                // 30 s clip), far less on GPU. A fixed cap cut long CPU dictations short.
-                let audio_secs = stt_samples.len() as u64 / 16_000;
-                let timeout = if is_cpu_mode {
-                    std::time::Duration::from_secs(60 + audio_secs * 2)
-                } else {
-                    std::time::Duration::from_secs(30 + audio_secs / 2)
-                };
-                match engine.transcribe(stt_samples, &dictionary, timeout) {
-                    Ok(text) => {
-                        let backend = if engine.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
-                        let vox_ms = t_vox.elapsed().as_millis();
-                        debug_log(app, &format!("voxtral ok via {backend} in {vox_ms}ms, {} chars", text.chars().count()));
-                        text
-                    }
-                    Err(e) => {
-                        let vox_ms = t_vox.elapsed().as_millis();
-                        debug_log(app, &format!("voxtral transcribe() failed in {vox_ms}ms: {e}"));
-                        log::error!("Ivy: Voxtral transcription failed: {e}");
-                        String::new()
-                    }
-                }
-            }
-            Err(e) => {
-                debug_log(app, &format!("voxtral engine load failed: {e}"));
-                log::error!("Ivy: Voxtral engine unavailable: {e}");
-                String::new()
-            }
-        };
-
-        // Hallucinations book, stage B: safety net against loops, impossible speaking rate
-        let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
-        if raw.is_empty() {
-            return raw;
+        Err(e) => {
+            debug_log(app, &format!("lite engine load failed: {e}"));
+            log::error!("Ivy: Lite engine unavailable: {e}");
+            String::new()
         }
+    };
 
-        // Voxtral resolves disfluencies and self-corrections directly from audio.
-        // Format commands, tone (if Professional), numbers (digits always), tech, names, and typography:
-        let tone = rulebooks::Tone::from_label(tone_preset);
-        let formatted = rulebooks::after_voxtral(&raw, tone);
-        apply_personal_dictionary(&formatted, &dictionary)
+    // Hallucinations book, stage B: safety net against loops, impossible speaking rate
+    let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
+    if raw.is_empty() {
+        return raw;
     }
+    let formatted = rulebooks::after_model(&raw, rulebooks::Tone::from_label(tone_preset));
+    apply_personal_dictionary(&formatted, &dictionary)
 }
 
 fn levenshtein(a: &str, b: &str) -> usize {
@@ -1903,8 +1760,7 @@ fn apply_personal_dictionary(text: &str, dictionary: &[String]) -> String {
 /// Runs on a spawned worker thread (never the shortcut-handler thread, and
 /// never touches the cpal `Recorder` — that's already been stopped and
 /// reduced to plain samples by the caller): saves the real audio, transcribes
-/// it for real (Voxtral Mini 3B or Whisper large-v3-turbo), optionally cleans it up,
-/// tone-aware), then pastes and persists — for every attempt, success or
+/// it for real (the lite model, then the tone's rulebooks), then pastes and persists — for every attempt, success or
 /// failure, so a failure is retryable from the saved audio and never just
 /// silently drops what was recorded. The capsule only ever hears the result
 /// via `ivy://dictation-complete`.
@@ -1929,7 +1785,6 @@ fn run_dictation_pipeline(
     mut samples: Vec<f32>,
     active_app: String,
     tone_preset: String,
-    cleanup_pass: bool,
     dictation_id: u64,
     target_hwnd: isize,
 ) {
@@ -1991,7 +1846,7 @@ fn run_dictation_pipeline(
         return;
     }
 
-    let text = transcribe_and_clean(&app, &models, &samples, &tone_preset, cleanup_pass);
+    let text = transcribe_and_clean(&app, &models, &samples, &tone_preset);
 
     if is_dictation_cancelled(dictation_id) {
         debug_log(&app, "pipeline aborted: dictation cancelled by user after transcription — discarding recording and history");
@@ -2020,7 +1875,6 @@ fn run_dictation_pipeline(
             words_count: 0,
             audio_duration: duration_sec,
             audio_path: audio_path.clone(),
-            summary: None,
             title: None,
         };
         {
@@ -2060,7 +1914,6 @@ fn run_dictation_pipeline(
         words_count: text.split_whitespace().count() as u32,
         audio_duration: duration_sec,
         audio_path,
-        summary: None,
         title: None,
     };
 
@@ -2134,8 +1987,7 @@ fn retry_transcription(app: tauri::AppHandle, id: String) -> Result<RetryResult,
         .collect();
 
     let models = models_dir(&app);
-    let settings = load_settings(&app);
-    let text = transcribe_and_clean(&app, &models, &samples, &tone_preset, settings.cleanup_pass);
+    let text = transcribe_and_clean(&app, &models, &samples, &tone_preset);
     
     // In-memory audio sample zeroization for sensitive speech data
     audio::zeroize_samples(&mut samples);
@@ -2213,71 +2065,16 @@ fn spawn_title_generation(app: &tauri::AppHandle, id: String, text: String) {
     let _ = app.emit("ivy://history-updated", ());
 }
 
-/// Real, explicitly user-triggered summarization for a long dictation —
-/// never part of the live record→transcribe→paste pipeline (that stays
-/// instant), only reachable from History, and never faked: on any real
-/// failure (timeout, divergence guard, model unavailable) this returns a
-/// real error for the UI to show, never the raw transcript silently
-/// relabeled as a "summary". Persists the result so it's never regenerated
-/// for the same recording unless the user explicitly asks again.
-#[tauri::command]
-fn summarize_transcript(app: tauri::AppHandle, id: String) -> Result<String, String> {
-    if !is_valid_session_id(&id) {
-        return Err("invalid session id format".into());
-    }
-    if !ai_features_enabled(&app) {
-        return Err("Summarize AI model not found — Voxtral Mini 3B is required".into());
-    }
-    if SUMMARIZING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
-        return Err("a summarization task is already in progress".into());
-    }
-    struct SummarizeGuard;
-    impl Drop for SummarizeGuard {
-        fn drop(&mut self) {
-            SUMMARIZING.store(false, Ordering::SeqCst);
-        }
-    }
-    let _guard = SummarizeGuard;
-
-    let raw = {
-        let sessions = load_history(&app);
-        let session = sessions.iter().find(|s| s.id == id).ok_or("no such session")?;
-        session.full_transcript.clone()
-    };
-    if raw.trim().is_empty() {
-        return Err("no transcript to summarize".into());
-    }
-    if raw.len() > 100_000 {
-        return Err("transcript exceeds safe summarization limit (100,000 characters)".into());
-    }
-    let models = models_dir(&app);
-    let engine = voxtral::engine(&models, !should_use_gpu(&app))?;
-    let summary = engine.summarize(&raw)?;
-
-    let _guard = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut sessions = load_history(&app);
-    if let Some(s) = sessions.iter_mut().find(|s| s.id == id) {
-        s.summary = Some(summary.clone());
-    }
-    write_history_atomic(&app, &sessions);
-    let _ = app.emit("ivy://history-updated", ());
-    Ok(summary)
-}
-
 /// "Touch Up" — the user clicked the optional capsule button that appears
-/// for a few seconds right after a real paste (Accuracy mode only, see
-/// `FloatingCapsule.tsx`). Never runs automatically and never adds latency
-/// to the live pipeline; this is a separate, on-demand round trip that
-/// swaps the just-pasted text for an AI-proofread version of itself —
-/// fixing missing punctuation and stray repeated words, never changing
-/// what the speaker actually said (enforced in `VoxtralEngine::touch_up`).
+/// for a few seconds right after a real paste (see `FloatingCapsule.tsx`).
+/// Never runs automatically and never adds latency to the live pipeline;
+/// it swaps the just-pasted text for a spell-fixed copy of itself
+/// (`spellcheck.rs`: typos only, never rephrasing). Nothing to fix -> nothing
+/// is swapped. Returns whether the text was swapped.
 #[tauri::command]
-fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<String, String> {
+fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<bool, String> {
     if !is_valid_session_id(&id) {
         return Err("invalid session id format".into());
-    }
-    if !ai_features_enabled(&app) {
-        return Err("Touch Up AI model not found — Voxtral Mini 3B is required".into());
     }
     if TOUCHING_UP.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return Err("a touch up is already in progress".into());
@@ -2290,13 +2087,17 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<String, Stri
     }
     let _guard = TouchUpGuard;
 
-    let (raw, tone) = {
+    let raw = {
         let sessions = load_history(&app);
         let session = sessions.iter().find(|s| s.id == id).ok_or("no such session")?;
-        (session.full_transcript.clone(), session.tone_preset.clone())
+        session.full_transcript.clone()
     };
     if raw.trim().is_empty() {
         return Err("no transcript to touch up".into());
+    }
+    let corrected = spellcheck::touch_up(&raw);
+    if corrected == raw {
+        return Ok(false); // no typos: leave the pasted text alone
     }
 
     // Peek (not consume) — if the window has already changed since the
@@ -2315,16 +2116,8 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<String, Stri
         return Err("switched to a different window since the paste — can't safely swap the text there".into());
     }
 
-    let models = models_dir(&app);
-    let engine = voxtral::engine(&models, !should_use_gpu(&app))?;
-    let corrected = engine.touch_up(&raw, &tone)?;
-
-    // Re-check focus now that the (potentially several-second) LLM call
-    // above has returned — the check before it only proves the window was
-    // still focused when touch-up *started*. Without this, switching away
-    // during that call sends the Ctrl+Z below into whatever the user
-    // tabbed to instead, exactly the race `paste_text`'s own "re-check
-    // right before sending keys" already guards against for a fresh paste.
+    // Re-check focus right before sending keys, the same race `paste_text`'s own
+    // "re-check right before sending keys" guards against for a fresh paste.
     #[cfg(windows)]
     let still_same_window = unsafe { GetForegroundWindow().0 as isize == target_hwnd };
     #[cfg(not(windows))]
@@ -2377,7 +2170,7 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<String, Stri
     drop(_guard_h);
     let _ = app.emit("ivy://history-updated", ());
     debug_log(&app, "touch-up: swapped in the corrected text");
-    Ok(corrected)
+    Ok(true)
 }
 
 /// Copies a session's saved recording out to the user's own Downloads
@@ -2945,7 +2738,7 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
     // (the same `check_rate_limit` used elsewhere for IPC endpoints) — real
     // bug, caught by Yash's own live testing: a deliberate fast double-tap
     // (the double-press-to-toggle gesture this app explicitly supports up
-    // to `DOUBLE_PRESS_WINDOW_MS` = 400ms apart) can easily land its second
+    // to `DOUBLE_PRESS_WINDOW_MS` = 600ms apart) can easily land its second
     // press within 150ms of the first, silently hitting this now-removed
     // gate with zero `debug_log` trace — "Alt+Space sometimes just does
     // nothing," completely undiagnosable from the log. The compare-exchange
@@ -3059,7 +2852,6 @@ fn handle_hotkey_up(app: &tauri::AppHandle) {
     let recorder_info = pending.recorder.info();
     let samples = pending.recorder.stop();
     debug_log(app, &format!("recorder stopped: {recorder_info}"));
-    let settings = load_settings(app);
     let app_handle = app.clone();
     let dictation_id = pending.id;
     let target_hwnd = pending.target_hwnd;
@@ -3069,7 +2861,6 @@ fn handle_hotkey_up(app: &tauri::AppHandle) {
             samples,
             pending.active_app,
             pending.tone_preset,
-            settings.cleanup_pass,
             dictation_id,
             target_hwnd,
         );
@@ -3447,9 +3238,9 @@ fn get_hardware_status(app: tauri::AppHandle) -> HardwareStatusDto {
     }
 }
 
-/// Frees the loaded STT/cleanup models so a hardware-mode switch (GPU/CPU)
+/// Frees the loaded model so a hardware-mode switch (GPU/CPU)
 /// takes effect on the next dictation instead of persisting the old engine
-/// for the rest of the session. No process restart: `stt::engine()` already
+/// for the rest of the session. No process restart: `lite::engine()` already
 /// checks the requested mode against what's loaded and reloads itself when
 /// they differ, so a full `app.restart()` was never doing anything a plain
 /// unload didn't already accomplish — and it raced the single-instance
@@ -3457,10 +3248,7 @@ fn get_hardware_status(app: tauri::AppHandle) -> HardwareStatusDto {
 /// silently kept the old (stale) process alive instead.
 #[tauri::command]
 fn apply_hardware_mode() {
-    voxtral::unload_engine();
     lite::unload_engine();
-    stt::unload_engine();
-    cleanup::unload_engine();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3568,8 +3356,7 @@ pub fn run() {
             hide_capsule_window,
             set_wizard_active,
             retry_transcription,
-            summarize_transcript,
-            touch_up_transcript,
+                touch_up_transcript,
             clear_all_history,
             get_user_stats,
             extract_audio,
@@ -3721,10 +3508,7 @@ pub fn run() {
             let settings = load_settings(&app_handle);
             let threshold = settings.vram_eviction_threshold;
             gpu_monitor::start_gpu_monitor(threshold, move || {
-                voxtral::unload_engine();
                 lite::unload_engine();
-                stt::unload_engine();
-                cleanup::unload_engine();
             });
 
             // Background pre-warm: Load active model into memory/VRAM on startup
@@ -3733,31 +3517,16 @@ pub fn run() {
             std::thread::spawn(move || {
                 let models = models_dir(&app_handle_warm);
                 let prefer_gpu = should_use_gpu(&app_handle_warm);
-                let settings = load_settings(&app_handle_warm);
                 let t_warm = std::time::Instant::now();
-                if settings.engine.eq_ignore_ascii_case("whisper") {
-                    if let Ok(eng) = stt::engine(&models, prefer_gpu) {
-                        let backend = if eng.is_gpu { "GPU (DirectML)" } else { "CPU" };
-                        debug_log(&app_handle_warm, &format!("stt engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
+                match lite::engine(&models, !prefer_gpu) {
+                    Ok(eng) => {
+                        let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                        // One silent practice pass, so the user's first real dictation doesn't pay the
+                        // one-time GPU pipeline / buffer setup (Yash: "the first reply takes a lot of time").
+                        let _ = eng.transcribe(&vec![0.0; 16_000], &[], std::time::Duration::from_secs(60));
+                        debug_log(&app_handle_warm, &format!("lite engine pre-warmed via {backend} in {}ms (incl. a silent warm-up pass)", t_warm.elapsed().as_millis()));
                     }
-                } else if settings.engine.eq_ignore_ascii_case("lite") {
-                    let is_cpu = !prefer_gpu;
-                    match lite::engine(&models, is_cpu) {
-                        Ok(eng) => {
-                            let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
-                            debug_log(&app_handle_warm, &format!("lite engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
-                        }
-                        Err(e) => debug_log(&app_handle_warm, &format!("lite engine pre-warm failed: {e}")),
-                    }
-                } else {
-                    let is_cpu = !prefer_gpu;
-                    match voxtral::engine(&models, is_cpu) {
-                        Ok(eng) => {
-                            let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
-                            debug_log(&app_handle_warm, &format!("voxtral engine pre-warmed via {backend} in {}ms", t_warm.elapsed().as_millis()));
-                        }
-                        Err(e) => debug_log(&app_handle_warm, &format!("voxtral engine pre-warm failed: {e}")),
-                    }
+                    Err(e) => debug_log(&app_handle_warm, &format!("lite engine pre-warm failed: {e}")),
                 }
             });
 
@@ -3803,7 +3572,6 @@ mod tests {
         let mut settings = SettingsConfig::default();
         settings.hotkey = "Alt+Space".to_string();
         settings.active_tone_preset = "Standard".to_string();
-        settings.dictation_mode = "accuracy".to_string();
         settings.hardware_mode = "gpu".to_string();
         assert!(validate_settings(&settings).is_ok());
     }

@@ -12,18 +12,18 @@ const ACCENT_RGB = '255, 107, 0';
 const TONES: { id: TonePreset; blurb: string; sample: string }[] = [
   {
     id: 'Casual',
-    blurb: 'Keeps contractions and slang. Light punctuation, nothing stiffened up.',
-    sample: 'yeah can you push that fix before standup, thanks',
+    blurb: 'Your words exactly as you said them: slang, contractions and all.',
+    sample: "Yeah, I'm gonna push that fix before standup, thanks!",
   },
   {
     id: 'Standard',
-    blurb: 'Fillers out, punctuation in, grammar fixed. Your voice, tidied.',
-    sample: 'Can you push that fix before standup? Thanks.',
+    blurb: 'Slang written out, filler "like" and "you know" dropped. Your voice, tidied.',
+    sample: "Yeah, I'm going to push that fix before standup, thanks!",
   },
   {
     id: 'Professional',
-    blurb: 'Full sentences, no contractions, business phrasing.',
-    sample: 'Could you please deploy that fix prior to our stand-up? Thank you.',
+    blurb: 'No contractions, no slang or chat words, no exclamation marks.',
+    sample: 'Yes, I am going to push that fix before standup, thank you.',
   },
 ];
 

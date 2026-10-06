@@ -1,11 +1,22 @@
 use std::ffi::{c_char, CStr, CString};
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
+
+static GLOBAL_BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
+
+fn get_or_init_backend() -> Result<Arc<LlamaBackend>, String> {
+    if let Some(backend) = GLOBAL_BACKEND.get() {
+        return Ok(backend.clone());
+    }
+    let backend = Arc::new(LlamaBackend::init().map_err(|e| format!("llama backend init failed: {e}"))?);
+    let _ = GLOBAL_BACKEND.set(backend.clone());
+    Ok(GLOBAL_BACKEND.get().unwrap().clone())
+}
 
 const LITE_DIR: &str = "ivy-lite";
 const MODEL_NAME: &str = "ivy-lite-Q8_0.gguf";
@@ -105,7 +116,7 @@ impl LiteEngine {
             return Err(format!("Lite mmproj not found: {}", mmproj_path.display()));
         }
 
-        let backend = crate::voxtral::get_or_init_backend()?;
+        let backend = get_or_init_backend()?;
         let mparams = LlamaModelParams::default().with_n_gpu_layers(if is_cpu_mode { 0 } else { 99 });
         let model = LlamaModel::load_from_file(&backend, &model_path, &mparams)
             .map_err(|e| format!("Lite model load failed: {e}"))?;
@@ -167,7 +178,7 @@ impl LiteEngine {
         let deadline = Instant::now() + timeout;
         let _guard = self.inference_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut parts = Vec::new();
-        for chunk in crate::voxtral::split_long_audio(samples_16k_mono) {
+        for chunk in split_long_audio(samples_16k_mono) {
             let text = self.transcribe_chunk(chunk, dictionary, deadline)?;
             if !text.is_empty() {
                 parts.push(text);
@@ -304,72 +315,40 @@ impl LiteEngine {
         unsafe { llama_cpp_sys_2::llama_batch_free(batch); }
         result.map(|_| String::from_utf8_lossy(&bytes).into_owned())
     }
+}
 
-    /// Generate text for Touch Up, Summarize, and title testing.
-    pub fn generate_text(
-        &self,
-        system_prompt: &str,
-        user_prompt: &str,
-        max_tokens: usize,
-        timeout: Duration,
-    ) -> Result<String, String> {
-        let deadline = Instant::now() + timeout;
-        let _guard = self.inference_lock.lock().unwrap_or_else(|e| e.into_inner());
+/// Longest piece sent to the model in one pass. 120 s of audio is ~1,560 audio tokens plus up to ~784 output
+/// tokens, well inside the 4,096-token context. Ivy allows dictations up to 500 s.
+pub const CHUNK_SECS: usize = 120;
 
-        clear_kv_cache(self.lctx);
-
-        let raw_model: *mut llama_cpp_sys_2::llama_model = unsafe { std::mem::transmute_copy(&self.model) };
-        let vocab = unsafe { llama_cpp_sys_2::llama_model_get_vocab(raw_model) };
-
-        let full_prompt = format!("<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n");
-        let c_prompt = CString::new(full_prompt).map_err(|e| e.to_string())?;
-
-        let tokenize = |buf: &mut Vec<llama_cpp_sys_2::llama_token>| unsafe {
-            llama_cpp_sys_2::llama_tokenize(vocab, c_prompt.as_ptr(), c_prompt.as_bytes().len() as i32, buf.as_mut_ptr(), buf.len() as i32, false, true)
-        };
-        let mut tokens: Vec<llama_cpp_sys_2::llama_token> = vec![0; c_prompt.as_bytes().len() + 32];
-        let mut n_tokens = tokenize(&mut tokens);
-        if n_tokens < 0 {
-            tokens.resize((-n_tokens) as usize, 0);
-            n_tokens = tokenize(&mut tokens);
-            if n_tokens < 0 {
-                return Err("failed to tokenize text prompt".into());
+/// Splits audio longer than `CHUNK_SECS` into pieces, cutting each at the quietest 100 ms window
+/// in the last 20 s before the limit, so a cut lands in a pause rather than mid-word.
+// ponytail: energy-based cut, not VAD; a correction spoken across a cut is not merged. Fine for
+// dictations under 2 min (almost all); revisit if long-form dictation becomes common.
+pub fn split_long_audio(samples: &[f32]) -> Vec<&[f32]> {
+    const SR: usize = 16_000;
+    const WIN: usize = SR / 10;
+    let limit = CHUNK_SECS * SR;
+    let mut out = Vec::new();
+    let mut rest = samples;
+    while rest.len() > limit {
+        let search_start = limit - 20 * SR;
+        let mut best = limit;
+        let mut best_energy = f32::INFINITY;
+        let mut i = search_start;
+        while i + WIN <= limit {
+            let e: f32 = rest[i..i + WIN].iter().map(|s| s * s).sum();
+            if e < best_energy {
+                best_energy = e;
+                best = i + WIN / 2;
             }
+            i += WIN / 2;
         }
-        tokens.truncate(n_tokens as usize);
-        if tokens.is_empty() {
-            return Ok(String::new());
-        }
-
-        let prompt_batch = unsafe { llama_cpp_sys_2::llama_batch_init(tokens.len() as i32, 0, 1) };
-        let last_idx = tokens.len() - 1;
-        for (i, &tok) in tokens.iter().enumerate() {
-            unsafe {
-                *prompt_batch.token.add(i) = tok;
-                *prompt_batch.pos.add(i) = i as llama_cpp_sys_2::llama_pos;
-                *prompt_batch.n_seq_id.add(i) = 1;
-                *(*prompt_batch.seq_id.add(i)).add(0) = 0;
-                *prompt_batch.logits.add(i) = if i == last_idx { 1 } else { 0 };
-            }
-        }
-        let mut pb = prompt_batch;
-        pb.n_tokens = tokens.len() as i32;
-        let decode_res = unsafe { llama_cpp_sys_2::llama_decode(self.lctx, pb) };
-        unsafe { llama_cpp_sys_2::llama_batch_free(prompt_batch); }
-        if decode_res != 0 {
-            clear_kv_cache(self.lctx);
-            return Err(format!("failed to decode text prompt batch: {decode_res}"));
-        }
-
-        let text = self.greedy_decode(tokens.len() as llama_cpp_sys_2::llama_pos, max_tokens, deadline);
-        clear_kv_cache(self.lctx);
-        let trimmed = text?.trim()
-            .trim_end_matches("<|im_end|>")
-            .trim_end_matches("<|endoftext|>")
-            .trim()
-            .to_string();
-        Ok(trimmed)
+        out.push(&rest[..best]);
+        rest = &rest[best..];
     }
+    out.push(rest);
+    out
 }
 
 #[cfg(test)]
@@ -505,38 +484,14 @@ mod tests {
             let stt_samples = if normalized.is_empty() { &raw_samples } else { &normalized };
             let peak_after = stt_samples.iter().fold(0.0_f32, |m, &s| m.max(s.abs()));
 
-            // Speech presence check (Stage A)
             let (_voiced, voice) = crate::rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
-            
             let raw = eng.transcribe(stt_samples, &[], Duration::from_secs(30)).unwrap_or_default();
-            let cleaned = crate::rulebooks::hallucinations::clean_asr_text(&raw, voice);
-            let final_text = crate::rulebooks::after_voxtral(&cleaned, crate::rulebooks::Tone::Standard);
-            let _ = final_text;
-
-            // Also test peak-normalisation as described in Task 7
-            let peak_norm_gain = (0.7 / peak_before).min(20.0);
-            let peak_norm_samples: Vec<f32> = raw_samples.iter().map(|&s| s * peak_norm_gain).collect();
-            let raw_peak_norm = eng.transcribe(&peak_norm_samples, &[], Duration::from_secs(30)).unwrap_or_default();
-
-            // Test DAGC with lower TARGET_RMS (0.10) to avoid hard-clipping
-            let mut agc_low = dagc::MonoAgc::new(0.10, 0.001).unwrap();
-            let mut low_samples = raw_samples.clone();
-            let frame_len = 320;
-            if low_samples.len() >= frame_len * 4 {
-                let mut f_rms: Vec<f32> = low_samples.chunks(frame_len).map(|f| (f.iter().map(|&s| s * s).sum::<f32>() / f.len() as f32).sqrt()).collect();
-                f_rms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let fl = f_rms[f_rms.len() / 10];
-                for chunk in low_samples.chunks_mut(frame_len) {
-                    let c_rms = (chunk.iter().map(|&s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
-                    agc_low.freeze_gain(c_rms <= fl * 1.5);
-                    agc_low.process(chunk);
-                }
+            let text = crate::rulebooks::hallucinations::clean_asr_text(&raw, voice);
+            println!("{:<8} {:<12.4} {:<12.4} {:<15.2} {}", clip_name, peak_before, peak_after, voice.voiced_secs, text);
+            // q2 and q5 may stay empty (the lab gets nothing for them either); q1, q3 and q4 must not
+            if ["q1.wav", "q3.wav", "q4.wav"].contains(&clip_name) {
+                assert!(!text.is_empty(), "{clip_name} came out empty on a quiet microphone");
             }
-            for s in low_samples.iter_mut() { *s = s.clamp(-1.0, 1.0); }
-            let raw_low_agc = eng.transcribe(&low_samples, &[], Duration::from_secs(30)).unwrap_or_default();
-
-            println!("{:<8} {:<12.4} {:<12.4} {:<15.2}\n  DAGC(0.25): \"{}\"\n  Peak-norm:  \"{}\"\n  DAGC(0.10): \"{}\"",
-                clip_name, peak_before, peak_after, voice.voiced_secs, raw, raw_peak_norm, raw_low_agc);
         }
         println!("======================================================\n");
     }
@@ -550,7 +505,13 @@ mod tests {
             return;
         }
 
-        let audio_path = lite_dir.join("golden/session-1790795120901.wav");
+        // any 16 kHz mono speech clip: IVY_BENCH_WAV, else a golden clip (skipped if neither exists)
+        let audio_path = std::env::var("IVY_BENCH_WAV").map(PathBuf::from)
+            .unwrap_or_else(|_| lite_dir.join("golden/session-1790795120901.wav"));
+        if !audio_path.exists() {
+            eprintln!("skipping: no benchmark clip (set IVY_BENCH_WAV)");
+            return;
+        }
         let base_samples = read_wav(&audio_path);
 
         let make_clip = |secs: usize| -> Vec<f32> {
@@ -684,40 +645,5 @@ mod tests {
             "Lite (Qwen3)", "CPU", format!("{} ms", cold_load_cpu), "0 MB", format!("{} MB", lite_cpu_ram),
             med_5s_cpu as f64 / 1000.0, med_15s_cpu as f64 / 1000.0, med_30s_cpu as f64 / 1000.0);
         println!("================================================================================================\n");
-    }
-
-    #[test]
-    fn test_lite_touch_up_summarize() {
-        let models_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
-        let lite_dir = models_dir.join(LITE_DIR);
-        if !lite_dir.join(MODEL_NAME).exists() {
-            eprintln!("skipping: Lite models not present");
-            return;
-        }
-
-        let eng = engine(&models_dir, false).expect("load Lite GPU");
-
-        let transcripts = [
-            ("Short", "the meeting is at 5pm we need to finish the report before then can you send it over"),
-            ("Medium", "Marketing finished the landing page yesterday. Email campaign goes out Tuesday morning at 9 AM. Payment integration bug is the main blocker; David thinks it will be fixed by Monday. Pricing page copy needs review before Tuesday; Priya should do this."),
-            ("Long", "My neighbor asked me to water her plants while she's in Kochi for 2 weeks. So, writing this down before I forget. The money plant and the snake plant only need water once a week on Sundays. The tulsi needs water every morning before the sun gets too strong. The fern in the bathroom likes humidity, so just spray it with water every 3 days. Don't overwater the cactus. Once in 10 days is plenty. She already said the curry leaf plant has some white bugs on it and I should spray the neem oil mix that's on the shelf near the door. The spare key is with the watchman, Raju, and her flight lands back on the 18th."),
-        ];
-
-        let touch_up_sys = "You are an expert editor. Clean up the following dictation: fix punctuation, grammar, and formatting while preserving the speaker's exact meaning. Output ONLY the cleaned text.";
-        let summarize_sys = "You are an executive assistant. Summarize the following transcript into concise, clear bullet points. Output ONLY the bullet points.";
-
-        println!("\n=== EVALUATING TEXT GENERATION ON LITE (QWEN3-ASR) ===");
-        for (name, text) in &transcripts {
-            println!("\n--- Transcript: {name} ---");
-            println!("Input: \"{}\"", text);
-            let t0 = Instant::now();
-            let touched = eng.generate_text(touch_up_sys, text, 256, Duration::from_secs(15));
-            println!("Touch Up ({:?}): {:?}", t0.elapsed(), touched);
-
-            let t1 = Instant::now();
-            let summ = eng.generate_text(summarize_sys, text, 256, Duration::from_secs(15));
-            println!("Summarize ({:?}): {:?}", t1.elapsed(), summ);
-        }
-        println!("======================================================\n");
     }
 }

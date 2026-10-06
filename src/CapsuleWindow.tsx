@@ -19,14 +19,7 @@ export default function CapsuleWindow() {
   // found" message — fetched once since the capsule window has no other
   // reason to hold live settings, and the hotkey rarely changes mid-session.
   const [manualPasteHotkey, setManualPasteHotkey] = useState<string>('Alt + V');
-  // Same one-time-fetch precedent as manualPasteHotkey above — gates
-  // whether Touch Up is offered at all (Accuracy mode only, per Yash). A
-  // ref, not just state, because the event listener below is registered
-  // once on mount (effect deps `[]`) and would otherwise close over
-  // whichever value existed at that instant — before the async settings
-  // fetch even resolves — and never see it update.
-  const dictationModeRef = useRef<string>('accuracy');
-  const [touchUpStatus, setTouchUpStatus] = useState<'offer' | 'loading' | 'done' | 'error'>('offer');
+  const [touchUpStatus, setTouchUpStatus] = useState<'offer' | 'loading' | 'done' | 'clean' | 'error'>('offer');
   const idleTimer = useRef<number | undefined>(undefined);
 
   // A real OS-level hide, not just rendering nothing — WebView2 can leave a
@@ -44,18 +37,13 @@ export default function CapsuleWindow() {
       invoke<SettingsConfig>('get_settings')
         .then((s) => {
           setManualPasteHotkey(s.manualPasteHotkey);
-          dictationModeRef.current = s.dictationMode;
         })
         .catch(() => {});
     };
     loadSettings();
 
     // This window is created once at startup and never remounts (it only
-    // ever shows/hides) — without re-fetching on a real settings change,
-    // switching Dictation Mode in Settings left `dictationModeRef` stuck on
-    // whatever mode was active when the capsule first loaded, silently
-    // gating the Touch Up offer below on stale state for the rest of the
-    // session.
+    // ever shows/hides), so it re-fetches on a real settings change.
     let unlistenSettings: (() => void) | undefined;
     try {
       listen('ivy://settings-updated', loadSettings)
@@ -129,15 +117,14 @@ export default function CapsuleWindow() {
       const delay = !e.payload.success
         ? e.payload.sessionId ? 7000 : 2500
         : e.payload.pasted ? 1600 : 3000;
-      // Touch Up is only ever offered after a real paste, in Accuracy
-      // mode — never adds a delay to Speed mode or the held-back-text
-      // case, and never fires for a failed dictation. After the normal
+      // Touch Up (spell-fix) is only ever offered after a real paste —
+      // never for the held-back-text case or a failed dictation. After the normal
       // "Pasted to X" confirmation window, the capsule shows the optional
-      // button for a further 5s, then dismisses either way if unclicked.
-      if (e.payload.success && e.payload.pasted && dictationModeRef.current === 'accuracy') {
+      // button for a further 7s (Yash: time to let go of the hotkey and read it), then dismisses if unclicked.
+      if (e.payload.success && e.payload.pasted) {
         idleTimer.current = window.setTimeout(() => {
           setMode('touch-up');
-          idleTimer.current = window.setTimeout(goIdle, 5000);
+          idleTimer.current = window.setTimeout(goIdle, 7000);
         }, delay);
       } else {
         idleTimer.current = window.setTimeout(goIdle, delay);
@@ -178,17 +165,16 @@ export default function CapsuleWindow() {
   };
 
   // Touch Up: reads the session's own already-pasted transcript, asks the
-  // real backend to proofread it (fixing missing punctuation and stray
-  // repeated words only — never a word the speaker didn't say, see
-  // `CleanupEngine::touch_up`), and swaps the pasted text for the result.
+  // backend to fix misspelled words (spell-check only, never rephrasing, see
+  // `spellcheck.rs`), and swaps the pasted text for the result.
   // Never runs automatically; only this explicit click starts it.
   const touchUp = async () => {
     if (!sessionId) return;
     clearTimeout(idleTimer.current);
     setTouchUpStatus('loading');
     try {
-      await invoke<string>('touch_up_transcript', { id: sessionId });
-      setTouchUpStatus('done');
+      const swapped = await invoke<boolean>('touch_up_transcript', { id: sessionId });
+      setTouchUpStatus(swapped ? 'done' : 'clean');
     } catch {
       setTouchUpStatus('error');
     }

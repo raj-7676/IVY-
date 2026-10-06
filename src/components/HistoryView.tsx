@@ -10,7 +10,6 @@ import {
   RefreshCw,
   MoreVertical,
   Download,
-  Sparkles,
 } from 'lucide-react';
 import { DictationSession } from '../types';
 
@@ -38,7 +37,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryFailedId, setRetryFailedId] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
-  const [summarizingId, setSummarizingId] = useState<string | null>(null);
   const [isClearingAll, setIsClearingAll] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -112,22 +110,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
       setToast(`Saved to ${dest}`);
     } catch (e) {
       setToast(typeof e === 'string' ? e : 'Could not extract audio');
-    }
-  };
-
-  // Real, explicit, opt-in — never runs automatically, and never happens as
-  // part of a live dictation (that must stay instant). Runs the actual
-  // Voxtral Mini 3B model against the full transcript; on a real failure this
-  // shows the real error, never a raw-transcript-relabeled-as-summary fake.
-  const handleSummarize = async (session: DictationSession) => {
-    setSummarizingId(session.id);
-    try {
-      const summary = await invoke<string>('summarize_transcript', { id: session.id });
-      onUpdateSession?.({ ...session, summary });
-    } catch (e) {
-      setToast(typeof e === 'string' ? e : 'Could not summarize this one');
-    } finally {
-      setSummarizingId(null);
     }
   };
 
@@ -277,12 +259,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
               const isRetrying = retryingId === session.id;
               const retryFailed = retryFailedId === session.id;
               const menuOpen = menuId === session.id;
-              const isSummarizing = summarizingId === session.id;
               const transcriptionFailed = session.fullTranscript.length === 0;
-              // Matches the backend's own definition of "a long dictation"
-              // (cleanup.rs's fast-path threshold) — summarizing a short
-              // one has nothing to compress.
-              const isLongEnoughToSummarize = session.wordsCount > 120;
               const duplicates = dupEntriesByPrimaryId.get(session.id);
 
               return (
@@ -341,31 +318,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
                       >
                         {isExpanded ? session.fullTranscript : session.preview}
                       </p>
-                    )}
-
-                    {session.summary && (
-                      <div
-                        className="mt-2.5 rounded-xl px-3 py-2.5 text-[12.5px] leading-relaxed text-white/75 whitespace-pre-line select-text"
-                        style={{
-                          backgroundColor: `rgba(${ACCENT_RGB}, 0.06)`,
-                          border: `1px solid rgba(${ACCENT_RGB}, 0.18)`,
-                        }}
-                      >
-                        <div
-                          className="text-[10px] uppercase tracking-wider font-semibold mb-1"
-                          style={{ color: `rgb(${ACCENT_RGB})` }}
-                        >
-                          Summary
-                        </div>
-                        {session.summary}
-                      </div>
-                    )}
-
-                    {isSummarizing && (
-                      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-white/40">
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        Summarizing…
-                      </div>
                     )}
 
                     <div className="flex items-center gap-2 mt-2">
@@ -496,19 +448,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
                               >
                                 <Download className="w-3.5 h-3.5" />
                                 Extract audio
-                              </button>
-                            )}
-                            {!transcriptionFailed && isLongEnoughToSummarize && (
-                              <button
-                                onClick={() => {
-                                  setMenuId(null);
-                                  void handleSummarize(session);
-                                }}
-                                disabled={isSummarizing}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] text-left text-white/80 hover:bg-white/[0.07] transition-colors duration-150 disabled:opacity-40"
-                              >
-                                <Sparkles className={`w-3.5 h-3.5 ${isSummarizing ? 'animate-pulse' : ''}`} />
-                                {session.summary ? 'Re-summarize' : 'Summarize'}
                               </button>
                             )}
                             <button

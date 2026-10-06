@@ -1,22 +1,28 @@
-; Qwen 2.5 3B's Q4_K_M GGUF (~1.96GB) companion file copy
+; Ivy's speech model (lite: Qwen3-ASR-1.7B fine-tuned by the lab, ~2.4 GB) ships as two files NEXT TO
+; the installer, not inside it: NSIS can't hold more than 2 GB and GitHub caps each release file at 2 GB.
+; The release is setup.exe + ivy-lite-Q8_0.gguf + mmproj-ivy-lite-f16.gguf in one folder; this copies
+; them into $INSTDIR\models\ivy-lite, where lite.rs loads them.
 !macro NSIS_HOOK_POSTINSTALL
-  SetOutPath "$INSTDIR\models\qwen2.5-3b"
-  IfFileExists "$EXEDIR\qwen2.5-3b-instruct-q4_k_m.gguf" copy_model skip_model
-  copy_model:
-    ; Specify the full destination path (no trailing backslash) to avoid the
-    ; NSIS parser bug where \" inside a double-quoted string is treated as an
-    ; escaped quote, preventing the string from terminating.
-    CopyFiles /SILENT "$EXEDIR\qwen2.5-3b-instruct-q4_k_m.gguf" "$INSTDIR\models\qwen2.5-3b\qwen2.5-3b-instruct-q4_k_m.gguf" 2055600
-  skip_model:
+  CreateDirectory "$INSTDIR\models\ivy-lite"
+  IfFileExists "$EXEDIR\ivy-lite-Q8_0.gguf" 0 model_missing
+  IfFileExists "$EXEDIR\mmproj-ivy-lite-f16.gguf" 0 model_missing
+    ; Full destination paths (no trailing backslash) avoid the NSIS parser bug where \" inside a
+    ; double-quoted string is treated as an escaped quote. Sizes are in KB, for the progress bar.
+    CopyFiles /SILENT "$EXEDIR\ivy-lite-Q8_0.gguf" "$INSTDIR\models\ivy-lite\ivy-lite-Q8_0.gguf" 1791428
+    CopyFiles /SILENT "$EXEDIR\mmproj-ivy-lite-f16.gguf" "$INSTDIR\models\ivy-lite\mmproj-ivy-lite-f16.gguf" 626733
+    Goto model_done
+  model_missing:
+    IfSilent model_done
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Ivy's speech model files were not found next to this installer.$\r$\n$\r$\nPut ivy-lite-Q8_0.gguf and mmproj-ivy-lite-f16.gguf in the same folder as the setup file and run it again.$\r$\n$\r$\nIvy is installed, but it can't transcribe until those two files are in:$\r$\n$INSTDIR\models\ivy-lite"
+  model_done:
 
   ; Silent/unattended installs (winget, Chocolatey, MDM, or Tauri's own
   ; updater re-running this installer) must never block on a modal dialog.
   IfSilent finish_hw_gpu
 
-  ; Hardware Acceleration Preference Selection (GPU vs CPU).
-  ; Text is a single unbroken string — NSIS does not support line-
-  ; continuation inside quoted MessageBox arguments.
-  MessageBox MB_YESNO|MB_ICONQUESTION "Choose Hardware Acceleration for Ivy:$\r$\n$\r$\n[YES] GPU Accelerated (Recommended)$\r$\n  DirectML graphics acceleration (NVIDIA, AMD, Intel Arc).$\r$\n  Accuracy mode runs Qwen AI live on every dictation (adds a little time) for extra correction, plus on-demand Touch Up & Summarize.$\r$\n  Best all-round: emails, professional writing, and coding.$\r$\n$\r$\n[NO] CPU Mode (Universal Compatibility)$\r$\n  Zero VRAM usage. Works on any PC.$\r$\n  Live dictation stays instant (50+ rules, no AI); Touch Up & Summarize still available on-demand.$\r$\n  Best for coding and maximum battery life.$\r$\n$\r$\nClick YES for GPU, NO for CPU." IDYES finish_hw_gpu IDNO finish_hw_cpu
+  ; GPU or CPU. Text is a single unbroken string: NSIS has no line continuation inside quoted
+  ; MessageBox arguments. Timings are measured lite numbers (IVY.md, section 23).
+  MessageBox MB_YESNO|MB_ICONQUESTION "How should Ivy run on this PC?$\r$\n$\r$\n[YES] GPU (recommended if you have a graphics card)$\r$\n  Uses your graphics card (NVIDIA, AMD or Intel, through Vulkan).$\r$\n  A 1-minute dictation is ready in about 2 seconds.$\r$\n$\r$\n[NO] CPU (works on any PC)$\r$\n  No graphics card needed.$\r$\n  A 1-minute dictation takes about 10 to 20 seconds.$\r$\n$\r$\nYou can change this any time in Settings > Hardware." IDYES finish_hw_gpu IDNO finish_hw_cpu
 
   finish_hw_gpu:
     CreateDirectory "$APPDATA\app.ivy.dictation"
@@ -34,10 +40,12 @@
   finish_hw:
 !macroend
 
-; Uninstaller cleanup for companion model
+; The model files were copied in by the hook above, so Tauri's uninstaller doesn't know about them.
 !macro NSIS_HOOK_PREUNINSTALL
-  Delete "$INSTDIR\models\qwen2.5-3b\qwen2.5-3b-instruct-q4_k_m.gguf"
-  RMDir "$INSTDIR\models\qwen2.5-3b"
+  Delete "$INSTDIR\models\ivy-lite\ivy-lite-Q8_0.gguf"
+  Delete "$INSTDIR\models\ivy-lite\mmproj-ivy-lite-f16.gguf"
+  RMDir "$INSTDIR\models\ivy-lite"
+  RMDir "$INSTDIR\models"
 !macroend
 
 ; Ivy's own 24h retention already limits how much voice data can exist at

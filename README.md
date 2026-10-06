@@ -8,16 +8,17 @@ network call, ever. Speech-to-text and cleanup both run on your own
 machine.
 
 - **Hotkey:** hold `Alt + Space` (customizable in Settings), speak, release.
-- **Multimodal Engine:** Voxtral Mini 3B 2507 (Apache-2.0, via `llama-cpp-2` with Vulkan GPU acceleration and CPU fallback), fine-tuned with an Ivy LoRA adapter to transcribe speech directly into cleaned text with self-corrections resolved in a single step.
-- **Cleanup & Formatting:** 9 deterministic rulebooks across Casual, Standard, and Professional tones (spoken commands, digits, tech terms, typography, personal dictionary). Voxtral also powers on-demand Touch Up and History Summarization (with LoRA dynamically disabled) on GPU and CPU. Whisper large-v3-turbo (int8 ONNX) remains available as a fallback engine.
+- **One model:** Ivy lite, Qwen3-ASR-1.7B (Apache-2.0) fine-tuned by the Ivy lab to hear speech and write clean text in one pass, with your self-corrections ("no wait", "sorry, I mean") already applied. Runs through `llama.cpp` on your graphics card (Vulkan: NVIDIA, AMD, Intel) or on any CPU. A 1-minute dictation takes about 2 s on GPU and 10-20 s on CPU.
+- **Tones:** Casual (your words as spoken), Standard (slang written out), Professional (no contractions, slang, chat words or exclamation marks), chosen per app. Deterministic rulebooks also format spoken commands, numbers (big round amounts as "18 lakhs" / "2 million"), tech terms and typography, plus your personal dictionary.
+- **Touch Up:** after a paste, one click fixes misspelled words (offline dictionary; never rephrases).
 - **History & Privacy:** every dictation and its audio are kept strictly locally and automatically purged after 24 hours (daily retention). Sensitive voice audio and chat history can also be manually purged at any time.
 - **Progress Without Compromise:** user productivity metrics (day streaks, words dictated, words per minute, and the 14-day activity chart) are decoupled from sensitive transcripts and stored as anonymous scalar aggregates (`stats.json`). Clearing your chat or voice history never wipes your streak or sets your stats back to zero.
-- **Network:** none. The packaged app makes zero network calls at runtime — models are bundled at build/install time, not fetched on launch.
+- **Network:** none. The packaged app makes zero network calls at runtime — the model ships next to the installer and is copied in at install time, never fetched on launch.
 
 ## Security & Privacy
 
 IVY is engineered under a zero-trust, zero-cloud architecture:
-- **Zero Cloud Leakage:** All speech recognition and AI processing (Voxtral Mini 3B multimodal GGUF, or Whisper ONNX fallback) run entirely in-process on your local CPU/GPU.
+- **Zero Cloud Leakage:** All speech recognition (the Ivy lite GGUF model) runs entirely in-process on your local CPU/GPU.
 - **Audio RAM Zeroization:** Raw PCM audio sample buffers in memory (`Vec<f32>`) are actively overwritten with zeros (`fill(0.0)`) upon completion or cancellation to prevent residual audio in unallocated memory.
 - **Daily Auto-Purge:** Audio recordings (`.wav`) and session text transcripts are automatically deleted after 24 hours.
 - **Strict IPC Validation:** Native Tauri IPC handlers validate all session identifiers to prevent directory traversal attacks.
@@ -37,7 +38,7 @@ IVY is engineered under a zero-trust, zero-cloud architecture:
 
 ```bash
 npm install
-npm run setup-models   # downloads the real STT + cleanup models, ~3.1GB, once
+npm run setup-models   # downloads Ivy's lite model (~2.4 GB) from the GitHub release, once
 npm run tauri dev      # real hotkey, real transcription, dev build
 ```
 
@@ -46,7 +47,7 @@ To build a release binary or installer:
 ```bash
 npm run build
 npx tauri build --no-bundle   # produces release/app.exe in Cargo's target folder
-# or, for the full NSIS installer + companion model file:
+# or, for the release folder (setup exe + the two model files, each under GitHub's 2 GB limit):
 npm run package-installer
 ```
 
@@ -55,6 +56,12 @@ actually use — it skips Tauri's build pipeline and the resulting exe will
 try to load the dev server URL instead of the bundled frontend. Always go
 through `npm run tauri dev` / `npx tauri build`.
 
+## Installing
+
+Download every file from the release into one folder (the setup exe plus `ivy-lite-Q8_0.gguf` and
+`mmproj-ivy-lite-f16.gguf`) and run the setup. It copies the model in and asks whether to run on GPU or CPU.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The model is Qwen3-ASR-1.7B (Apache-2.0) fine-tuned by the Ivy lab. Touch Up's
+word list is SymSpell's English frequency dictionary (MIT, `src-tauri/data/en-80k.LICENSE.txt`).

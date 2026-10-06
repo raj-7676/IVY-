@@ -16,8 +16,7 @@
 //! - LLM / audio-LLM cleanup adds a second kind: answering, swapping words, inventing numbers.
 //!   The fix is verification against what was heard, never trusting the model [3-stage verify, 2025].
 //!
-//! Rules. Stage A runs on the AUDIO before recognition, stage B on the RECOGNIZER's text,
-//! stage C on any AI or model output (book `faithfulness`):
+//! Rules. Stage A runs on the AUDIO before recognition, stage B on the model's text:
 //!   A1 Silence in, nothing out: under 0.25 s of voiced audio -> no transcription at all.
 //!   A2 Trim leading and trailing non-speech (keep 0.3 s around the speech).
 //!   A3 Shorten every pause longer than 1.5 s to 0.6 s (pauses are where hallucinations grow).
@@ -30,8 +29,6 @@
 //!   B3 Loops: a phrase of 2-8 words repeated 3+ times in a row is kept once.
 //!   B4 Speaking rate: more words than 7 per voiced second is impossible speech; trailing sentences
 //!      are dropped until the rate is plausible (hallucinations attach at the end, in the pauses).
-//!   C1-C8 AI output must pass `faithfulness::check_ai_faithful` (no new words or numbers, no silent
-//!      drops, no answering, no loops, no growth, no collapse) or the rules-only text is used.
 //! What to KNOW (do not "fix" these into hallucinations):
 //!   - Never fill a gap: if audio is unclear, write what was heard or nothing, never a guess.
 //!   - Never complete a sentence the speaker abandoned ("I want pizza and" stays short).

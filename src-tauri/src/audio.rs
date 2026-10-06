@@ -242,31 +242,12 @@ fn resample_to_16k(samples: &[f32], source_rate: u32) -> Vec<f32> {
     out
 }
 
-/// Layer A: real adaptive gain control for speech recognition, via `dagc`'s
-/// `MonoAgc` — a published digital-AGC algorithm (Design and implementation
-/// of a new digital automatic gain control, hal-01397371), not a hand-rolled
-/// formula. Brings quiet speech up toward Whisper's optimal energy
-/// (~ -12dBFS RMS, per real STT vendor guidance — Corti's audio
-/// best-practices docs — surfaced while investigating why normal speaking
-/// volume was mistranscribing) with peak clipping protection.
-///
-/// Two real, evidenced bugs predate this version, both from a single static
-/// gain computed off the *whole clip*'s RMS:
-/// 1. No noise/voice separation — a quiet mic in a noisy room got its
-///    fan/hiss boosted by the exact same factor as the voice, handing
-///    Whisper a louder-but-noisier signal than the original. Fixed by
-///    gating `MonoAgc`'s adaptation on a per-frame noise-floor estimate
-///    (10th-percentile RMS across 20ms frames, same detector as before):
-///    frames at/near that floor freeze the AGC (nothing to safely boost),
-///    frames clearly above it let it adapt toward target.
-/// 2. A single scalar can't track a clip whose loudness actually varies
-///    (quiet opener, louder mid-sentence, trailing quiet word) — `MonoAgc`
-///    adapts per-sample instead, converging toward target rather than
-///    scaling everything by one fixed number, and self-corrects downward on
-///    genuinely loud stretches instead of only ever pushing up.
-/// A perfectly uniform signal (no quiet/loud contrast at all — indistinguishable
-/// from pure room noise) stays frozen throughout and is left alone, same
-/// guarantee as before.
+/// Gain for quiet microphones: peak-normalise to 0.7, gain capped at 20x (Task 7, 2026-10-06).
+/// The lite model went EMPTY on very quiet speech (peaks 0.04-0.06); this recovered 4 of the lab's
+/// 5 quiet clips (`lite::tests::test_task7_quiet_microphones`). Left alone: true silence (peak < 0.01),
+/// audio that is already loud enough (peak >= 0.7), and flat signals with no speech contrast
+/// (peak/RMS < 1.6), so room noise is not blown up. One linear gain keeps the speech shape intact
+/// (no pumping, no clipping). It replaced a `dagc` AGC toward -12 dBFS that was tuned for Whisper.
 pub fn normalize_audio(samples: &[f32]) -> Vec<f32> {
     if samples.is_empty() {
         return Vec::new();

@@ -15,16 +15,14 @@ import {
   Check,
   CheckCircle2,
   Zap,
-  Sparkles,
   WifiOff,
   Trash2,
   Eye,
   HardDrive,
   Wand2,
 } from 'lucide-react';
-import { SettingsConfig, TonePreset, DictationMode, HardwareMode } from '../types';
+import { SettingsConfig, TonePreset, HardwareMode } from '../types';
 import { StageIndicator, OnboardingStage } from './StageIndicator';
-import { ModeMatrix } from './ModeMatrix';
 import { HotkeyBadge } from './HotkeyBadge';
 import { SoundwaveVisualizer, DictationVisualState } from './SoundwaveVisualizer';
 import { audioFeedback, MicrophoneAnalyzer } from '../services/audioFeedback';
@@ -35,13 +33,12 @@ interface FirstRunViewProps {
   onComplete: () => void;
   hotkey?: string;
   manualPasteHotkey?: string;
-  dictationMode?: DictationMode;
   hardwareMode?: HardwareMode;
   onUpdateSettings?: (newSettings: Partial<SettingsConfig>) => void;
 }
 
 const TARGET_PHRASE = 'Hi, my name is James.';
-// Voxtral resolves self-corrections in Accuracy mode on both GPU and CPU.
+// Ivy's model resolves self-corrections on both GPU and CPU.
 const CORRECTION_PHRASE = 'Hi, I am James. I want to order French fries. No, no, I want a burger.';
 const ACCENT_RGB = '255, 107, 0';
 const isTauri = typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
@@ -51,14 +48,12 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
   onComplete,
   hotkey = 'Alt + Space',
   manualPasteHotkey = 'Alt + V',
-  dictationMode = 'accuracy',
   hardwareMode = 'gpu',
   onUpdateSettings,
 }) => {
   const [currentStage, setCurrentStage] = useState<OnboardingStage>(1);
   const [completedStages, setCompletedStages] = useState<Set<OnboardingStage>>(new Set());
-  const [selectedMode, setSelectedMode] = useState<DictationMode>(dictationMode);
-  const liveAi = selectedMode === 'accuracy';
+  const [selectedHw, setSelectedHw] = useState<HardwareMode>(hardwareMode);
 
   // Stage 5 (Voice Test) state machine
   const [dictationState, setDictationState] = useState<DictationVisualState>('waiting');
@@ -1365,12 +1360,10 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                   className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mb-1.5"
                   style={{ fontFamily: 'Syne, sans-serif' }}
                 >
-                  {liveAi ? 'Ivy understands when you change your mind' : 'Changing your mind mid-sentence'}
+                  Ivy understands when you change your mind
                 </h1>
                 <p id="stage-4-subtitle" className="text-white/60 text-sm sm:text-base max-w-md mx-auto">
-                  {liveAi
-                    ? 'Say the whole line, correction and all — the AI drops what you took back.'
-                    : 'Speed mode pastes corrections as spoken — try it and see.'}
+                  Say the whole line, correction and all — Ivy drops what you took back.
                 </p>
               </div>
 
@@ -1429,12 +1422,10 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                   }}
                 >
                   <span className="text-[10.5px] uppercase tracking-wider text-[#FFA133] font-semibold">
-                    {liveAi ? 'No trigger words needed' : 'Not active in Speed mode'}
+                    No trigger words needed
                   </span>
                   <p className="text-white/55 text-[11px] max-w-sm">
-                    {liveAi
-                      ? 'Voxtral multimodal AI reads the whole line and keeps what you meant. It is AI, so glance at the result.'
-                      : 'Speed mode pastes what you said directly with core rules. Switch to Accuracy mode to have self-corrections resolved.'}
+                    Ivy's model hears the whole line and keeps what you meant. It is AI, so glance at the result.
                   </p>
                 </div>
 
@@ -1547,9 +1538,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                           <span>
                             {correctionCaught
                               ? 'Ivy caught the correction!'
-                              : liveAi
-                              ? "Didn't catch it that time"
-                              : 'Pasted as spoken — expected in Speed mode'}
+                              : "Didn't catch it that time"}
                           </span>
                         </div>
                         {/* The real cleaned transcript — whatever it actually
@@ -1569,9 +1558,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                         <p className="text-white/50 text-[11px] sm:text-xs max-w-sm">
                           {correctionCaught
                             ? '"French fries" never made it in — that\'s the retracted half of what you said, gone on its own.'
-                            : liveAi
-                            ? 'The AI can miss sometimes, or the words may have been misheard. Try saying it again.'
-                            : 'Speed mode keeps exactly what you said. Switch to Accuracy mode to have self-corrections resolved.'}
+                            : 'The AI can miss sometimes, or the words may have been misheard. Try saying it again.'}
                         </p>
                       </motion.div>
                       );
@@ -1657,7 +1644,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
             </motion.div>
           )}
 
-          {/* Stage 3: AI Speed & Smart Dictation Strategy */}
+          {/* Stage 3: GPU or CPU */}
           {currentStage === 3 && (
             <motion.div
               key="stage-5"
@@ -1677,27 +1664,26 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                     border: '1px solid rgba(255, 107, 0, 0.35)',
                   }}
                 >
-                  Step 3 of 7: AI Engine &amp; Strategy
+                  Step 3 of 7: GPU or CPU
                 </span>
                 <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                  Choose Your Transcription Mode
+                  Where should Ivy run?
                 </h3>
                 <p className="text-xs sm:text-sm text-white/60 max-w-md">
-                  Select how Ivy balances raw typing and smart speech polish. You can change this anytime later in Settings.
+                  Same model and same results either way; the GPU is just faster. You can change this anytime in Settings → Hardware.
                 </p>
               </div>
 
-              {/* Dictation Mode Selectable Cards */}
+              {/* GPU / CPU cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
-                {/* Instant Speed Card */}
                 <div
-                  id="mode-card-speed"
+                  id="hw-card-gpu"
                   onClick={() => {
-                    setSelectedMode('speed');
-                    onUpdateSettings?.({ dictationMode: 'speed' });
+                    setSelectedHw('gpu');
+                    onUpdateSettings?.({ hardwareMode: 'gpu' });
                   }}
                   className={`rounded-2xl p-4 border transition-all cursor-pointer flex flex-col justify-between ${
-                    selectedMode === 'speed'
+                    selectedHw === 'gpu'
                       ? 'bg-[#FF6B00]/10 border-[#FF6B00] shadow-[0_0_25px_rgba(255,107,0,0.25)]'
                       : 'bg-white/[0.03] hover:bg-white/[0.06] border-white/10'
                   }`}
@@ -1707,7 +1693,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                       <div className="flex items-center gap-2.5">
                         <div
                           className={`p-2 rounded-xl ${
-                            selectedMode === 'speed'
+                            selectedHw === 'gpu'
                               ? 'bg-[#FF6B00]/20 text-[#FFA133]'
                               : 'bg-white/[0.06] text-white/60'
                           }`}
@@ -1715,36 +1701,35 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                           <Zap className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="text-sm font-bold text-white">Instant Speed</h4>
-                          <span className="text-[11px] font-semibold text-amber-400">No AI • no extra wait</span>
+                          <h4 className="text-sm font-bold text-white">GPU</h4>
+                          <span className="text-[11px] font-semibold text-[#FFA133]">Recommended if you have a graphics card</span>
                         </div>
                       </div>
                       <div
                         className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
-                          selectedMode === 'speed' ? 'border-[#FF6B00] bg-[#FF6B00]' : 'border-white/30'
+                          selectedHw === 'gpu' ? 'border-[#FF6B00] bg-[#FF6B00]' : 'border-white/30'
                         }`}
                       >
-                        {selectedMode === 'speed' && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
+                        {selectedHw === 'gpu' && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
                       </div>
                     </div>
                     <p className="text-[11.5px] text-white/70 mt-3 leading-relaxed">
-                      Core rules only: fillers, spoken punctuation, grammar, numbers. Same on GPU or CPU. Corrections like "scratch that" are pasted as spoken.
+                      Runs on your graphics card (NVIDIA, AMD or Intel). A 1-minute dictation is ready in about 2 seconds.
                     </p>
                   </div>
-                  <span className="text-[10px] text-amber-400/90 font-medium mt-3 block">
-                    ⚡ Perfect for fast chat, coding &amp; quick notes
+                  <span className="text-[10px] text-[#FFA133] font-medium mt-3 block">
+                    ⚡ Fastest. Switches to CPU by itself on battery or while gaming
                   </span>
                 </div>
 
-                {/* Smart Accuracy Card */}
                 <div
-                  id="mode-card-accuracy"
+                  id="hw-card-cpu"
                   onClick={() => {
-                    setSelectedMode('accuracy');
-                    onUpdateSettings?.({ dictationMode: 'accuracy' });
+                    setSelectedHw('cpu');
+                    onUpdateSettings?.({ hardwareMode: 'cpu' });
                   }}
                   className={`rounded-2xl p-4 border transition-all cursor-pointer flex flex-col justify-between ${
-                    selectedMode === 'accuracy'
+                    selectedHw === 'cpu'
                       ? 'bg-[#FF6B00]/10 border-[#FF6B00] shadow-[0_0_25px_rgba(255,107,0,0.25)]'
                       : 'bg-white/[0.03] hover:bg-white/[0.06] border-white/10'
                   }`}
@@ -1754,54 +1739,34 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                       <div className="flex items-center gap-2.5">
                         <div
                           className={`p-2 rounded-xl ${
-                            selectedMode === 'accuracy'
+                            selectedHw === 'cpu'
                               ? 'bg-[#FF6B00]/20 text-[#FFA133]'
                               : 'bg-white/[0.06] text-white/60'
                           }`}
                         >
-                          <Sparkles className="w-5 h-5" />
+                          <Cpu className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="text-sm font-bold text-white">Smart Accuracy</h4>
-                          <span className="text-[11px] font-semibold text-[#FFA133]">Recommended</span>
+                          <h4 className="text-sm font-bold text-white">CPU</h4>
+                          <span className="text-[11px] font-semibold text-[#FFA133]">Works on any PC</span>
                         </div>
                       </div>
                       <div
                         className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
-                          selectedMode === 'accuracy' ? 'border-[#FF6B00] bg-[#FF6B00]' : 'border-white/30'
+                          selectedHw === 'cpu' ? 'border-[#FF6B00] bg-[#FF6B00]' : 'border-white/30'
                         }`}
                       >
-                        {selectedMode === 'accuracy' && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
+                        {selectedHw === 'cpu' && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
                       </div>
                     </div>
                     <p className="text-[11.5px] text-white/70 mt-3 leading-relaxed">
-                      Voice AI hears and applies your self-corrections on GPU and CPU, followed by precision formatting rules.
+                      Runs on your processor, no graphics card needed. A 1-minute dictation takes about 10 to 20 seconds.
                     </p>
                   </div>
                   <span className="text-[10px] text-[#FFA133] font-medium mt-3 block">
-                    ✨ Worth the wait for anything that matters
+                    🔋 No graphics memory used
                   </span>
                 </div>
-              </div>
-
-              <div
-                className="w-full rounded-2xl p-4 sm:p-5 border mt-4"
-                style={{
-                  backgroundColor: 'rgba(18, 13, 26, 0.82)',
-                  borderColor: 'rgba(255, 161, 51, 0.3)',
-                  boxShadow: '0 10px 30px -10px rgba(0,0,0,0.7), inset 0 1px 1px 0 rgba(255,255,255,0.2)',
-                }}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#FF6B00]/20 text-[#FFA133] border border-[#FF6B00]/30">
-                    All 4 modes
-                  </span>
-                  <h4 className="text-xs sm:text-sm font-bold text-white">What each combination does</h4>
-                </div>
-                <p className="text-[11.5px] text-white/70 leading-relaxed mb-3">
-                  Speed or Accuracy is chosen above; GPU or CPU in Settings → Hardware. Your current setup is highlighted.
-                </p>
-                <ModeMatrix dictationMode={selectedMode} hardwareMode={hardwareMode} />
               </div>
 
               {/* The Golden Rule of Smart Dictation Card */}
@@ -1915,12 +1880,11 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                   Step 4 of 7: Touch Up
                 </span>
                 <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                  Something look off? One click fixes it.
+                  Spot a typo? One click fixes it.
                 </h3>
                 <p className="text-xs sm:text-sm text-white/60 max-w-md">
-                  In Accuracy mode, a small button appears on the capsule for a few seconds right
-                  after Ivy pastes. Click it only if you notice something — most of the time you
-                  won't need to.
+                  A small button appears on the capsule for a few seconds right after Ivy pastes.
+                  Click it only if you spot a typo — most of the time you won't need to.
                 </p>
               </div>
 
@@ -1939,7 +1903,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                     Pasted
                   </span>
                   <p className="text-[13px] text-white/70 font-mono leading-relaxed">
-                    so the the meeting is at 5 pm we need to finish the report before then
+                    I'll recieve the report tommorow and send it seperately.
                   </p>
                 </div>
 
@@ -1960,7 +1924,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                     After clicking
                   </span>
                   <p className="text-[13px] text-white/90 font-mono leading-relaxed">
-                    So the meeting is at 5 PM. We need to finish the report before then.
+                    I'll receive the report tomorrow and send it separately.
                   </p>
                 </div>
               </div>
@@ -1972,8 +1936,8 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                     What it fixes
                   </span>
                   <span className="text-[11px] text-white/70 leading-normal">
-                    Missing periods and question marks from natural speaking pauses, and a stray
-                    repeated word from a stutter that slipped through.
+                    Misspelled words, using an offline English dictionary. Names, numbers,
+                    emails, file names and Indian words like lakh or chai are left alone.
                   </span>
                 </div>
                 <div className="rounded-xl p-2.5 bg-amber-500/10 border border-amber-500/25 flex flex-col gap-1">
@@ -1982,17 +1946,17 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
                     What it never does
                   </span>
                   <span className="text-[11px] text-white/70 leading-normal">
-                    Change a single word you actually said. Not a rewrite — if it can't fix
-                    something safely, it changes nothing at all.
+                    Rephrase or rewrite anything. If there's no typo, it changes nothing and
+                    tells you so.
                   </span>
                 </div>
                 <div className="rounded-xl p-2.5 bg-blue-500/10 border border-blue-500/25 flex flex-col gap-1">
                   <span className="text-[11px] font-bold text-blue-400 flex items-center gap-1.5">
                     <Cpu className="w-3.5 h-3.5" />
-                    Accuracy mode
+                    Instant, works offline
                   </span>
                   <span className="text-[11px] text-white/70 leading-normal">
-                    Offered after real pastes in Accuracy mode on both GPU and CPU. Never runs automatically, never changes your words, and dismisses after 5s if unclicked.
+                    Offered after every real paste, on GPU and CPU. Never runs automatically, and dismisses after 7s if unclicked.
                   </span>
                 </div>
               </div>

@@ -289,7 +289,6 @@ export default function App() {
             <FirstRunView
               hotkey={settings.hotkey}
               manualPasteHotkey={settings.manualPasteHotkey}
-              dictationMode={settings.dictationMode}
               hardwareMode={settings.hardwareMode}
               onUpdateSettings={handleUpdateSettings}
               onDismiss={() => {

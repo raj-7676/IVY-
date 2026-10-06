@@ -16,6 +16,8 @@
 //!    "60 miles per hour" -> "60 mph", "20 degrees celsius" -> "20°C". "pounds" stays (weight or money?).
 //! N6 Simple math only between numbers: "5 plus 10 equals 15" -> "5 + 10 = 15" ("2 times a day" stays).
 //! N7 Phone country codes: "plus 91 98765 43210" -> "+91 98765 43210".
+//! N8 Big round amounts get the scale word: "18,00,000" -> "18 lakhs", "₹1,15,000" -> "₹1.15 lakhs",
+//!    "2,50,00,000" -> "2.5 crores", "$2,000,000" -> "$2 million" ("1,15,437" and "68,990" stay).
 
 use super::{core_lower, per_line, split3};
 
@@ -83,8 +85,50 @@ pub fn apply(text: &str) -> String {
         let toks = after_number(toks);
         let toks = math(toks);
         let toks = phone(toks);
+        let toks = big_amounts(toks);
         toks.join(" ")
     })
+}
+
+// ---------------------------------------------------------------- N8 big round amounts
+
+/// Big round amounts read better with the scale word than with five or six zeros (Yash, 2026-10-06):
+/// Indian grouping or ₹ -> lakhs/crores ("18,00,000" -> "18 lakhs", "₹1,15,000" -> "₹1.15 lakhs",
+/// "2,50,00,000" -> "2.5 crores"); Western grouping or $ € £ -> million/billion ("$2,000,000" -> "$2 million").
+/// Only from 1 lakh / 1 million up, only when at most 2 decimals say it exactly ("1,15,437" stays),
+/// and only for numbers written with commas or a currency sign (phone numbers and IDs never are).
+fn big_amounts(toks: Vec<String>) -> Vec<String> {
+    toks.into_iter()
+        .map(|tok| {
+            let (l, core, r) = split3(&tok);
+            let groups: Vec<&str> = core.split(',').collect();
+            if core.is_empty() || !groups.iter().all(|g| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit())) {
+                return tok.clone();
+            }
+            let Ok(v) = groups.concat().parse::<u64>() else { return tok.clone() };
+            let indian_commas = groups.len() >= 3 && groups.last().map_or(false, |g| g.len() == 3)
+                && groups[1..groups.len() - 1].iter().all(|g| g.len() == 2);
+            let western_commas = groups.len() >= 3 && groups[1..].iter().all(|g| g.len() == 3);
+            let indian = l.ends_with('₹') || (indian_commas && !l.ends_with(['$', '€', '£']));
+            let western = !indian && (l.ends_with(['$', '€', '£']) || western_commas);
+            let scales: &[(u64, &str, &str)] = if indian {
+                &[(10_000_000, "crore", "crores"), (100_000, "lakh", "lakhs")]
+            } else if western {
+                &[(1_000_000_000, "billion", "billion"), (1_000_000, "million", "million")]
+            } else {
+                return tok.clone();
+            };
+            for &(unit, one, many) in scales {
+                if v >= unit && v % (unit / 100) == 0 {
+                    let x = format!("{:.2}", v as f64 / unit as f64);
+                    let x = x.trim_end_matches('0').trim_end_matches('.');
+                    let word = if x == "1" { one } else { many };
+                    return format!("{l}{x} {word}{r}");
+                }
+            }
+            tok.clone()
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------- N1 dates
@@ -712,6 +756,26 @@ mod tests {
             "That's a plus for us.",
             "Version 2.0 shipped.",
         ] {
+            assert_eq!(apply(s), s, "changed {s:?}");
+        }
+    }
+
+    #[test]
+    fn big_round_amounts_get_the_scale_word() {
+        let cases = [
+            ("salary is ₹18,00,000 a year", "salary is ₹18 lakhs a year"),
+            ("revenue 18,00,000 this month", "revenue 18 lakhs this month"),
+            ("just 1,00,000.", "just 1 lakh."),
+            ("rent ₹1,15,000, paid", "rent ₹1.15 lakhs, paid"),
+            ("budget 2,50,00,000", "budget 2.5 crores"),
+            ("raised $2,000,000 today", "raised $2 million today"),
+            ("a 2,000,000 user base", "a 2 million user base"),
+            ("worth 1,500,000,000", "worth 1.5 billion"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(apply(input), want, "input {input:?}");
+        }
+        for s in ["It costs 68,990.", "exactly 1,15,437 votes", "call 9845012367", "UTR 456789", "18 lakhs", "$150,000 deal"] {
             assert_eq!(apply(s), s, "changed {s:?}");
         }
     }

@@ -20,7 +20,7 @@ interface FloatingCapsuleProps {
   manualPasteHotkey: string;
   /** Where the optional Touch Up click currently stands — only meaningful
    *  while `mode === 'touch-up'`. */
-  touchUpStatus?: 'offer' | 'loading' | 'done' | 'error';
+  touchUpStatus?: 'offer' | 'loading' | 'done' | 'clean' | 'error';
   onRetry?: () => void;
   onCancel?: () => void;
   onTouchUp?: () => void;
@@ -320,7 +320,7 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
                   className="flex items-center gap-1.5 text-[11.5px] font-medium text-white/90 hover:text-white transition-colors cursor-pointer"
                 >
                   <Wand2 className="w-3.5 h-3.5 text-[#FFA133]" />
-                  <span>Something off? Touch Up</span>
+                  <span>Typos? Touch Up</span>
                 </button>
               )}
               {touchUpStatus === 'loading' && (
@@ -337,7 +337,15 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
                   <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 border bg-emerald-500/20 border-emerald-400/40">
                     <Check className="w-3 h-3 stroke-[2.5] text-emerald-400" />
                   </div>
-                  <span className="text-[11.5px] font-medium text-white truncate">Touched up</span>
+                  <span className="text-[11.5px] font-medium text-white truncate">Typos fixed</span>
+                </>
+              )}
+              {touchUpStatus === 'clean' && (
+                <>
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 border bg-emerald-500/20 border-emerald-400/40">
+                    <Check className="w-3 h-3 stroke-[2.5] text-emerald-400" />
+                  </div>
+                  <span className="text-[11.5px] font-medium text-white truncate">No typos found</span>
                 </>
               )}
               {touchUpStatus === 'error' && (

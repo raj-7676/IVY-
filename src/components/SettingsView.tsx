@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, Check, Cpu, Zap, Sparkles, Activity, RefreshCw } from 'lucide-react';
+import { ChevronDown, Check, Cpu, Zap, Activity, RefreshCw } from 'lucide-react';
 import { SettingsConfig, HardwareMode, HardwareStatus } from '../types';
 import { ModeMatrix, modeCombo } from './ModeMatrix';
 
@@ -466,120 +466,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             )}
           </Row>
 
-          {/* Cleanup */}
-          <Row
-            title="Clean up as I speak"
-            description="Strips fillers, fixes punctuation, and resolves self-corrections before pasting."
-          >
-            <button
-              id="cleanup-pass-toggle"
-              role="switch"
-              aria-checked={settings.cleanupPass}
-              onClick={() => onUpdateSettings({ cleanupPass: !settings.cleanupPass })}
-              className="w-11 h-6 rounded-full transition-colors duration-200 relative shrink-0 p-0.5"
-              style={{
-                backgroundColor: settings.cleanupPass
-                  ? `rgb(${ACCENT_RGB})`
-                  : 'rgba(255,255,255,0.12)',
-                boxShadow: settings.cleanupPass ? `0 0 14px rgba(${ACCENT_RGB}, 0.45)` : 'none',
-              }}
-            >
-              <span
-                className={`block w-5 h-5 rounded-full bg-white transition-transform duration-200 ${
-                  settings.cleanupPass ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </Row>
-
-          {/* AI Transcription Engine */}
-          <Row
-            title="Transcription Engine"
-            description="Voxtral Mini 3B (Apache-2.0): Single multimodal model that directly hears speech and rewrites it with self-corrections applied. Whisper large-v3-turbo: Speech-to-text fallback."
-          >
-            <div
-              className="flex items-center p-1 rounded-xl"
-              style={{
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <button
-                id="engine-voxtral-btn"
-                type="button"
-                onClick={() => onUpdateSettings({ engine: 'voxtral' })}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  (settings.engine ?? 'voxtral') === 'voxtral'
-                    ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
-                    : 'text-white/50 hover:text-white/85'
-                }`}
-                title="Voxtral Mini 3B: End-to-end multimodal model with self-correction resolution."
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Voxtral (Recommended)</span>
-              </button>
-              <button
-                id="engine-whisper-btn"
-                type="button"
-                onClick={() => onUpdateSettings({ engine: 'whisper' })}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  settings.engine === 'whisper'
-                    ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
-                    : 'text-white/50 hover:text-white/85'
-                }`}
-                title="Whisper large-v3-turbo: Legacy speech-to-text fallback."
-              >
-                <Cpu className="w-3.5 h-3.5" />
-                <span>Whisper</span>
-              </button>
-            </div>
-          </Row>
-
-          {/* Speed vs Accuracy Preference */}
-          {settings.cleanupPass && (
-            <Row
-              title="Transcription Priority"
-              description="Speed: core rules, minimal latency. Accuracy: Voxtral multimodal AI with self-correction resolution and full rulebook formatting."
-            >
-              <div
-                className="flex items-center p-1 rounded-xl"
-                style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                }}
-              >
-                <button
-                  id="dictation-mode-speed-btn"
-                  type="button"
-                  onClick={() => onUpdateSettings({ dictationMode: 'speed' })}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    settings.dictationMode === 'speed'
-                      ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
-                      : 'text-white/50 hover:text-white/85'
-                  }`}
-                  title='Core rules only. Minimal latency, GPU or CPU. Corrections like "scratch that" are pasted as spoken.'
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                  <span>Speed</span>
-                </button>
-                <button
-                  id="dictation-mode-accuracy-btn"
-                  type="button"
-                  onClick={() => onUpdateSettings({ dictationMode: 'accuracy' })}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    settings.dictationMode === 'accuracy'
-                      ? 'bg-[#FF6B00] text-white shadow-[0_0_12px_rgba(255,107,0,0.5)]'
-                      : 'text-white/50 hover:text-white/85'
-                  }`}
-                  title="Accuracy: Voxtral multimodal AI resolves self-corrections on GPU (~1s) or CPU, with full rulebook formatting."
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Accuracy</span>
-                </button>
-              </div>
-            </Row>
-          )}
-
           {/* Compute Acceleration (GPU vs CPU) */}
           <div className="py-5 border-t border-white/[0.06]">
             <div className="flex items-start justify-between gap-6 mb-3">
@@ -617,7 +503,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   )}
                 </div>
                 <p className="text-[12px] text-white/40 mt-1 leading-relaxed max-w-md">
-                  Where speech recognition runs — DirectML works on any GPU (NVIDIA, AMD, Intel). In Accuracy mode, GPU also turns on live AI. See all four combinations below.
+                  Where Ivy's model runs. GPU is fast on any graphics card (NVIDIA, AMD, Intel); CPU works on every PC, just slower.
                   {hardwareStatus.onBattery && ' Currently on battery, so dictation runs on CPU to save power regardless of the mode below.'}
                 </p>
               </div>
@@ -673,16 +559,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <div className="mt-3">
-              {settings.cleanupPass ? (
-                <ModeMatrix
-                  dictationMode={settings.dictationMode}
-                  hardwareMode={hardwareStatus.onBattery ? 'cpu' : (settings.hardwareMode || 'gpu')}
-                />
-              ) : (
-                <p className="text-[11.5px] text-white/50 leading-relaxed">
-                  Cleanup is off, so Ivy pastes the raw transcript. GPU or CPU only changes where speech recognition runs.
-                </p>
-              )}
+              <ModeMatrix hardwareMode={hardwareStatus.onBattery ? 'cpu' : (settings.hardwareMode || 'gpu')} />
             </div>
 
             {/* Live GPU Telemetry pill */}
@@ -835,27 +712,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </h3>
                 <p className="text-[11.5px] text-white/40 mt-0.5">
                   {pendingModeSwitch === 'gpu'
-                    ? 'DirectML GPU Engine'
-                    : 'Universal CPU Engine (0% VRAM usage)'}
+                    ? 'Graphics card (Vulkan)'
+                    : 'Processor (no graphics memory used)'}
                 </p>
               </div>
             </div>
 
             <div className="mt-3">
-              <p className="text-[12px] text-white/55">
-                {settings.cleanupPass
-                  ? `You're in ${settings.dictationMode === 'speed' ? 'Speed' : 'Accuracy'} mode, so you'll get ${modeCombo(settings.dictationMode, pendingModeSwitch).title}:`
-                  : 'Cleanup is off, so only speech recognition moves.'}
-              </p>
-              {settings.cleanupPass && (
-                <ul className="mt-1.5 flex flex-col gap-1">
-                  {modeCombo(settings.dictationMode, pendingModeSwitch).points.map((point) => (
-                    <li key={point} className="text-[12px] text-white/75 leading-snug">
-                      • {point}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <p className="text-[12px] text-white/55">On {modeCombo(pendingModeSwitch).title}:</p>
+              <ul className="mt-1.5 flex flex-col gap-1">
+                {modeCombo(pendingModeSwitch).points.map((point) => (
+                  <li key={point} className="text-[12px] text-white/75 leading-snug">
+                    • {point}
+                  </li>
+                ))}
+              </ul>
             </div>
 
             <div className="mt-4 p-3.5 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-start gap-3 text-[12px] text-white/65 leading-relaxed">

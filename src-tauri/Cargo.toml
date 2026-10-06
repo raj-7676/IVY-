@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.1.4"
 description = "Ivy - offline voice dictation"
 authors = ["Yash"]
 license = "MIT"
@@ -40,20 +40,14 @@ windows = { version = "0.58", features = [
 
 # Real multimodal STT & cleanup (Voxtral Mini 3B via llama.cpp mtmd) and fallback
 # STT (Whisper large-v3-turbo ONNX) — see src/voxtral.rs, src/stt.rs, src/audio.rs.
-ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls", "directml"] }
-ndarray = "0.17"
-tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 # Whisper-compatible log-mel spectrogram frontend (real, published crate —
 # matches whisper.cpp/pytorch/librosa reference output; avoids hand-rolling
 # STFT + mel filterbank code).
-mel_spec = "0.4.0"
 cpal = "0.18"
 rubato = "0.16"
 llama-cpp-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
 llama-cpp-sys-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
-encoding_rs = "0.8"
 hound = "3"
-dagc = "0.1.1"
 
 # Vendored copy of llama-cpp-sys-2 0.1.156 with one fix: llama.cpp avg-pools Voxtral's audio encoder output
 # (187 tokens per 30 s) but the real model does not (375). See "IVY PATCH" in

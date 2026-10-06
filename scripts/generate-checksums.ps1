@@ -14,7 +14,7 @@ if (-not (Test-Path $TargetDir)) {
 
 $files = Get-ChildItem -Path $TargetDir -Recurse | Where-Object { 
     -not $_.PSIsContainer -and 
-    ($_.Extension -in @(".exe", ".msi", ".zip", ".gz")) -and
+    ($_.Extension -in @(".exe", ".msi", ".zip", ".gz", ".gguf")) -and
     $_.FullName -notmatch '[\\/](build_script|deps|incremental|\.fingerprint)[\\/]' -and
     $_.Name -notmatch '^build-script'
 }

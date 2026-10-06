@@ -19,8 +19,6 @@ export const INITIAL_SETTINGS: SettingsConfig = {
     Professional: ['Outlook', 'Gmail', 'Slack', 'Word'],
   },
   personalDictionary: [],
-  cleanupPass: true,
-  dictationMode: 'accuracy',
   selectedMic: '',
   availableMics: [],
   // Higher than Friday's own 72% default — Ivy's darker/warmer ground color
