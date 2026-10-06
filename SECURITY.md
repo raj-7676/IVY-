@@ -1,79 +1,126 @@
 # Security Policy
 
-IVY Transcriber is an offline, local-first voice dictation application for Windows designed from the ground up for strict privacy, zero telemetry, and zero network exposure. We treat security and user privacy as primary architectural invariants.
+Ivy is an offline voice dictation app for Windows. It hears your voice, turns it into text and types
+that text into other apps, so we take security and privacy seriously. This page explains how to report
+a problem, what is in scope, and what Ivy does and does not protect against.
 
----
+## Supported versions
 
-## Supported Versions
+Only the latest release gets security fixes. Please update before reporting.
 
-Only the latest release of IVY Transcriber receives active security patches.
+| Version | Supported |
+|---|---|
+| 0.1.4 (latest) | Yes |
+| Older | No |
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-| < 0.1.0 | :x:                |
+## Reporting a vulnerability
 
----
+**Please do not open a public issue for security problems.**
 
-## Reporting a Vulnerability
+Report privately through GitHub: open the repository's **Security** tab, then **Report a vulnerability**.
+Only the maintainer can see the report.
 
-If you discover a security vulnerability or privacy leak in IVY Transcriber, please disclose it responsibly so we can protect our users before details become public.
+A good report includes:
+- the Ivy version and your Windows version
+- what an attacker can do, and what they need first (for example "another program on the same PC")
+- the steps to reproduce it
+- a proof of concept, if you have one
 
-### Preferred Method: GitHub Private Vulnerability Reporting
-Please report vulnerabilities directly through GitHub's built-in **Private Vulnerability Reporting**:
-1. Navigate to the repository's **Security** tab.
-2. Click on **Advisories** and select **Report a vulnerability**.
-3. Provide detailed reproduction steps, proof of concept (PoC), and affected components.
+If private reporting is not available, open an issue that only asks for a private contact. Put no
+details in it.
 
-### If GitHub Advisories Are Unavailable
-Open a regular GitHub issue containing only a request for a private channel — no
-reproduction details, no proof of concept — and a maintainer will follow up to
-arrange disclosure.
+### What happens next
 
-### Response SLA & Disclosure Timeline
-- **Initial Response:** Within 24–48 hours confirming receipt of the report.
-- **Triage & Assessment:** Within 72 hours with an initial severity classification.
-- **Remediation & Patch:** Typically within 7–14 days depending on complexity.
-- **Public Disclosure:** Coordinated with the reporter after a patched release is published.
+Ivy is maintained by one person, so these are honest targets, not guarantees:
 
----
+- We confirm we received your report within **7 days**.
+- We tell you whether we accept it, and how serious we think it is, within **14 days**.
+- We aim to release a fix within **90 days**. Serious problems are fixed first.
+- We publish a GitHub Security Advisory after the fix is out, and credit you unless you prefer not.
 
-## Core Security & Privacy Guarantees
+Please give us the chance to fix the problem before you share details publicly. If we stop
+responding, you may disclose after 90 days.
 
-IVY Transcriber enforces the following architectural security invariants:
+## Scope
 
-1. **100% Offline & Air-Gapped Operation:**
-   - The application executes zero telemetry, zero analytics, and zero cloud API requests during transcription.
-   - All AI models (Voxtral Mini 3B multimodal GGUF via Vulkan/CPU, and fallback Whisper ONNX via DirectML) run 100% locally.
+**In scope**
+- The Ivy app and its installer from this repository and its [Releases](https://github.com/raj-7676/IVY-/releases)
+- Anything that makes Ivy send data over the network, keep recordings or text longer than promised,
+  type text into the wrong window, or run code it shouldn't
+- How Ivy loads its speech model files
+- The rule files and scripts in this repository
 
-2. **Daily Sensitive Data Auto-Purge:**
-   - Voice recordings (`.wav`) and session transcription records (`history.json`) are automatically purged after 24 hours.
-   - Manual "Clear History" immediately wipes all raw voice audio files and transcription records from disk.
+**Out of scope**
+- Problems that need an attacker who already controls your Windows account or has admin rights
+  (they can read your files and keystrokes without Ivy)
+- Copies of Ivy downloaded from anywhere other than this repository
+- Bugs in llama.cpp, Tauri, WebView2 or Windows itself. Please report those to their projects; tell us
+  too if Ivy needs to update.
+- Wrong transcriptions, unless they cause a security problem
+- Missing hardening with no real attack, and reports produced only by automated scanners
 
-3. **Decoupled Zero-Knowledge Lifetime Statistics:**
-   - User progress (total words dictated, words per minute, day streaks, daily activity counts) is stored in a decoupled `stats.json`.
-   - `stats.json` contains **zero audio files, zero words, and zero transcription text**, storing only mathematical aggregates so user productivity progress is preserved even when sensitive transcripts are wiped.
+## How Ivy protects you
 
-4. **In-Memory Audio Buffer Zeroization:**
-   - Audio buffers in RAM are actively zeroized (`0.0f32` overwrite) when transcription completes or when recording is cancelled, preventing sensitive spoken speech from lingering in memory.
+- **No network.** Ivy makes no network calls while running: no telemetry, no analytics, no accounts,
+  no automatic updates. The speech model is copied in by the installer and is never downloaded by the app.
+  The app's Content Security Policy only allows local content.
+- **Short-lived data.** Recordings and transcripts are deleted after 24 hours. **Clear all** in History
+  deletes them at once. Lifetime stats (word counts, streaks) are stored separately as plain numbers,
+  with no text or audio.
+- **Audio in memory is wiped.** Audio buffers are overwritten with zeros when a dictation finishes or
+  is cancelled.
+- **Typing into the right window.** Before pasting, Ivy checks the window you were dictating into still
+  has focus. If it doesn't, the text is held back (Alt + V pastes it) instead of going somewhere else.
+  Your previous clipboard is restored afterwards.
+- **No focus stealing.** The dictation bar never takes keyboard focus, so it cannot interrupt typing in
+  password boxes.
+- **Safe file handling.** Recording IDs are checked against a strict allow-list and file paths are
+  confirmed to stay inside Ivy's own folder.
+- **Uninstall asks.** The uninstaller offers to delete all Ivy data.
 
-5. **Path Traversal & IPC Isolation:**
-   - All audio export and file operations enforce strict path canonicalization within the designated application sandbox.
-   - Session IDs are validated against strict alphanumeric allowlists to prevent directory traversal attacks.
+## What Ivy does not protect against
 
-6. **Focus-Safe Keystroke Injection:**
-   - Win32 synthetic paste (`SendInput`) verifies that the original target application still holds foreground focus before injecting keystrokes.
-   - If focus changed, the transcript is held in a safe buffer (`MANUAL_PASTE_TEXT`, accessible via `Alt+V`) and never pasted into unknown windows.
-   - Clipboard contents are backed up and restored with verification to avoid overwriting newer user copies.
+Being clear about limits is part of security:
 
-7. **Non-Activating Overlay Protection:**
-   - The floating indicator window uses `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` and `SW_SHOWNA` to guarantee it never steals focus or interrupts secure credential entry.
+- **Other programs on your PC.** For up to 24 hours, recordings and transcripts are stored unencrypted
+  in `%APPDATA%\app.ivy.dictation`, readable by anything running as your Windows user. Clear History if
+  that matters to you.
+- **Clipboard watchers.** Ivy pastes through the clipboard for a moment. A program that watches the
+  clipboard could see the text during that moment.
+- **Tampered model files.** Ivy loads its model with llama.cpp. Several llama.cpp bugs have let a
+  specially crafted model file crash or take over the program that loads it (for example CVE-2024-25664
+  to 25666, CVE-2025-49847, CVE-2026-27940). Only use the model files from this repository's Releases, and
+  check them against `SHA256SUMS.txt` (see below).
+- **Unsigned app.** Ivy is not code-signed yet, so Windows cannot confirm who made the installer. Only
+  download it from this repository's Releases page.
 
----
+## Check your download
 
-## Safe Harbor Policy
+Each release includes `SHA256SUMS.txt`. In PowerShell, inside the folder with your downloads:
 
-We consider security research conducted under this policy to be:
-- **Authorized** under applicable anti-hacking laws.
-- **Exempt** from anti-circumvention claims under the DMCA.
-- **Lawful**, provided researchers act in good faith, do not compromise the privacy of other users, and do not disrupt system availability.
+```powershell
+Get-FileHash .\* -Algorithm SHA256 | Format-Table Hash, Path
+```
+
+Every hash must match the line for that file in `SHA256SUMS.txt`. If one doesn't, delete the files and
+download them again from the Releases page.
+
+## How the code is checked
+
+Every change pushed to `main` is checked automatically:
+- **CodeQL** static analysis of the interface code
+- **Gitleaks** scan for passwords, keys and tokens accidentally committed
+- **cargo audit** and **npm audit** for known vulnerabilities in dependencies
+- **Dependency Review** on pull requests, and **OpenSSF Scorecard**
+- **Dependabot** suggests dependency updates monthly; security alerts arrive as soon as GitHub knows
+
+Ivy vendors its own copy of `llama-cpp-sys-2` (with a small documented patch), so llama.cpp security
+fixes are applied by updating that copy, not automatically.
+
+## Good-faith research
+
+If you make a good-faith effort to follow this policy, we will consider your research authorized, we
+will not take legal action against you, and we will work with you to understand and fix the problem.
+Please only test on your own computer and your own data, never on other people's.
+
+There is no paid bug bounty. We are grateful for every report and will credit you in the advisory.
