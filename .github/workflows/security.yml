@@ -72,6 +72,13 @@ jobs:
           npm ci
           npm run build
 
+      # llama.cpp is built with its Vulkan backend; its build script needs VULKAN_SDK (and glslc).
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: latest
+          cache: true
+
       - name: Run Cargo Check
         working-directory: src-tauri
         run: |
