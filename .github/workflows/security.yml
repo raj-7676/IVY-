@@ -50,7 +50,10 @@ jobs:
 
   code-lint-and-check:
     name: Security Compilation & Warnings Verification
-    runs-on: windows-latest
+    # windows-latest moved to Visual Studio 2026 (MSVC 14.51) in June 2026; with it the vendored
+    # llama.cpp build fails (LNK1181: ggml.c.obj never written). Ivy is built and released with
+    # VS 2022, which the windows-2022 image keeps (maintained until ~2029).
+    runs-on: windows-2022
     env:
       # llama.cpp's nested CMake object paths pass Windows' 260-character limit under the
       # default checkout path; a short target dir keeps them under it (README, "Building").
