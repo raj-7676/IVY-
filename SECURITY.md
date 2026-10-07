@@ -10,7 +10,7 @@ Only the latest release gets security fixes. Please update before reporting.
 
 | Version | Supported |
 |---|---|
-| 0.1.4 (latest) | Yes |
+| 0.1.5 (latest) | Yes |
 | Older | No |
 
 ## Reporting a vulnerability
@@ -63,15 +63,20 @@ responding, you may disclose after 90 days.
 
 - **No network.** Ivy makes no network calls while running: no telemetry, no analytics, no accounts,
   no automatic updates. The speech model is copied in by the installer and is never downloaded by the app.
-  The app's Content Security Policy only allows local content.
+  The app's Content Security Policy only allows local content. (Before 0.1.5, the main window linked
+  to Google Fonts, so it opened a connection to fonts.googleapis.com at startup. No text or audio
+  was sent. Fixed in 0.1.5.) Ivy's window runs in Microsoft Edge WebView2, which is part of Windows.
+  WebView2 itself can contact Microsoft for its own services, as set by your Windows settings. That
+  traffic carries nothing from Ivy.
 - **Short-lived data.** Recordings and transcripts are deleted after 24 hours. **Clear all** in History
   deletes them at once. Lifetime stats (word counts, streaks) are stored separately as plain numbers,
   with no text or audio.
-- **Audio in memory is wiped.** Audio buffers are overwritten with zeros when a dictation finishes or
-  is cancelled.
+- **Audio in memory is wiped.** Ivy's audio buffers, including the boosted and resampled copies, are
+  overwritten with zeros when a dictation finishes or is cancelled. The speech engine's own working
+  memory inside llama.cpp is freed but not wiped.
 - **Typing into the right window.** Before pasting, Ivy checks the window you were dictating into still
   has focus. If it doesn't, the text is held back (Alt + V pastes it) instead of going somewhere else.
-  Your previous clipboard is restored afterwards.
+  Your previous clipboard (text, an image or copied files) is restored afterwards.
 - **Kept out of clipboard history.** Text Ivy puts on the clipboard is marked so Windows leaves it out
   of clipboard history (Win + V) and cloud clipboard sync, and clipboard managers that respect the
   Windows flag skip it.
@@ -111,7 +116,8 @@ download them again from the Releases page.
 ## How the code is checked
 
 Every change pushed to `main` is checked automatically:
-- **CodeQL** static analysis of the interface code
+- **CodeQL** static analysis of the interface code, the Rust core and the CI workflows
+- Every CI action is pinned to an exact commit, so a hijacked action tag can't change what runs
 - **Gitleaks** scan for passwords, keys and tokens accidentally committed
 - **cargo audit** and **npm audit** for known vulnerabilities in dependencies
 - **Dependency Review** on pull requests, and **OpenSSF Scorecard**

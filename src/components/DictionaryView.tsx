@@ -109,8 +109,11 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ settings, onUpda
           <div>
             <h2 className="text-[16px] font-semibold tracking-tight text-white/90">Snippets</h2>
             <p className="text-[12.5px] text-white/40 mt-1.5 leading-relaxed max-w-md">
-              Say a short phrase on its own, like "my email", and Ivy types the full text you saved. Said inside a
-              longer sentence, it stays as you said it.
+              Say a trigger phrase anywhere in a sentence, and Ivy types the full text you saved in its place.
+              "Send it to my email address" becomes "Send it to you@example.com".
+            </p>
+            <p className="text-[12px] text-white/30 mt-1 leading-relaxed max-w-md">
+              Pick a phrase you'd never say by accident. Alt + B undoes a paste if one slips through.
             </p>
           </div>
           <form onSubmit={addSnippet} className="flex flex-col gap-2 max-w-md">
@@ -119,7 +122,7 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ settings, onUpda
               value={trigger}
               maxLength={80}
               onChange={(e) => setTrigger(e.target.value)}
-              placeholder='When I say… (e.g. "my email")'
+              placeholder='When I say… (e.g. "my email address")'
               className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/[0.18]"
             />
             <textarea
@@ -127,7 +130,7 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ settings, onUpda
               maxLength={5000}
               rows={3}
               onChange={(e) => setSnippetText(e.target.value)}
-              placeholder="…type this (e.g. yash@example.com)"
+              placeholder="…type this (e.g. you@example.com)"
               className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/[0.18] resize-none"
             />
             <button

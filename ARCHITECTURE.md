@@ -1,168 +1,121 @@
-# IVY Architecture & Codebase Map
+# Ivy architecture
 
-> **System Overview:** IVY is a standalone, 100% offline, zero-cloud speech-to-text dictation application built on **Tauri v2**, **Rust**, and **React 19 / TypeScript**.
->
-> It follows the **Tauri v2 Principle of Least Privilege**: sandboxing the user-facing web interface in Microsoft WebView2 while executing low-level audio capture, hardware acceleration, neural inference, and OS keystroke injection inside a memory-safe Rust native core.
-
----
-
-## 1. Architectural Model & Component Interaction
+Ivy is an offline dictation app for Windows built with **Tauri v2** (Rust) and **React 19 / TypeScript**.
+The interface runs in Microsoft WebView2 and only shows things and sends commands. Everything else
+(microphone, the speech model, formatting, pasting into other apps) runs in the Rust core.
 
 ```mermaid
 graph TD
-    subgraph Frontend["Frontend Layer (Sandboxed WebView / React + TypeScript)"]
-        UI_MAIN["Main App Window (index.html / App.tsx)"]
-        UI_CAPSULE["Overlay Capsule (capsule.html / CapsuleWindow.tsx)"]
-        COMPONENTS["Views & UI Components (Home, History, Settings, etc.)"]
-        FE_AUDIO["Audio Feedback & Visualizers (audioFeedback.ts, etc.)"]
+    subgraph Frontend["Interface (WebView2, React + TypeScript)"]
+        UI_MAIN["Main window (index.html, App.tsx)"]
+        UI_CAPSULE["Dictation bar (capsule.html, CapsuleWindow.tsx)"]
     end
 
-    subgraph Bridge["IPC Communication Layer (Tauri v2 Security Boundary)"]
-        INVOKE["Tauri invoke() (Commands)"]
-        EVENTS["Tauri emit() / listen() (Async Events)"]
-        CAPS["Capabilities & ACLs (capabilities/default.json)"]
+    subgraph Bridge["Tauri IPC"]
+        INVOKE["invoke() commands"]
+        EVENTS["events"]
     end
 
-    subgraph Backend["Backend Layer (Native System Core / Rust)"]
-        CORE["Tauri App Core (main.rs, lib.rs)"]
-        AUDIO["Audio Capture & Isolation (audio.rs - CPAL)"]
-        VOXTRAL["Multimodal Engine (voxtral.rs - Voxtral Mini 3B GGUF + LoRA)"]
-        STT["Fallback STT (stt.rs - Whisper large-v3-turbo ONNX)"]
-        RULEBOOKS["Formatting Rulebooks (rulebooks/ - 9 Books)"]
-        GPU["Hardware & VRAM Telemetry (gpu_monitor.rs - DXGI)"]
-        WIN32["OS Automation (Win32 SendInput, Clipboard, Hooks)"]
+    subgraph Backend["Rust core (src-tauri/src)"]
+        CORE["lib.rs: hotkeys, pipeline, history, settings, paste"]
+        AUDIO["audio.rs: microphone (cpal), resampling, quiet-mic boost"]
+        LITE["lite.rs: speech model via llama.cpp (Vulkan GPU or CPU)"]
+        RULEBOOKS["rulebooks/: deterministic formatting and tone"]
+        SPELL["spellcheck.rs: Touch Up"]
+        GPU["gpu_monitor.rs: GPU load, full-screen detection, power"]
+        HOTKEY["modifier_hotkey.rs: Ctrl + Shift hotkey"]
     end
 
-    UI_MAIN --> INVOKE
+    UI_MAIN --> INVOKE --> CORE
     UI_CAPSULE --> INVOKE
-    INVOKE --> CAPS --> CORE
-    CORE --> EVENTS --> UI_CAPSULE
+    CORE --> EVENTS --> UI_MAIN
+    EVENTS --> UI_CAPSULE
     CORE --> AUDIO
-    CORE --> VOXTRAL
-    CORE --> STT
+    CORE --> LITE
     CORE --> RULEBOOKS
+    CORE --> SPELL
     CORE --> GPU
-    CORE --> WIN32
+    CORE --> HOTKEY
 ```
 
----
+## How a dictation flows
 
-## 2. Comprehensive Codebase Organization
+1. The hotkey starts recording (`audio.rs`). Audio stays in memory.
+2. On release, the silence gate (`rulebooks/hallucinations.rs`, stage A) drops recordings with no voice.
+3. `lite.rs` runs Ivy's speech model (Qwen3-ASR-1.7B fine-tuned for dictation, GGUF, through llama.cpp's
+   mtmd audio support). It hears the speech and writes clean text, with self-corrections applied, in one pass.
+4. The rulebooks format that text: spoken commands, numbers, tech terms, names, the active tone, typography.
+5. The personal dictionary fixes spellings of names and jargon. Then Snippets replace trigger phrases with
+   their saved text.
+6. `lib.rs` pastes through the clipboard, but only if the window you dictated into still has focus. The
+   clipboard is marked so Windows leaves it out of clipboard history, and your previous clipboard is restored.
+7. The audio buffer is overwritten with zeros. The recording and transcript are saved in History and
+   deleted after 24 hours.
 
-### A. Frontend (Presentation & Client Logic)
+## Files
 
-The frontend is packaged using Vite and runs in Microsoft WebView2 without direct filesystem or network access.
-
-| Path | Category | Purpose |
-| :--- | :--- | :--- |
-| `index.html` | Window Host | HTML entry point for the main dashboard window. |
-| `capsule.html` | Window Host | Dedicated transparent HTML entry point for the floating liquid-glass capsule overlay. |
-| `src/main.tsx` | App Bootstrapper | Initializes the React root, global error boundary, and launches `App.tsx`. |
-| `src/capsule-main.tsx` | Overlay Bootstrapper | Dedicated, isolated entry point for the system-wide floating overlay window. |
-| `src/App.tsx` | Main Application | Primary UI container, view routing, window controls (minimize/maximize/close), and settings loading. |
-| `src/CapsuleWindow.tsx` | Overlay Window | Real-time state machine for recording, transcribing, and paste confirmation. |
-| `src/components/HomeView.tsx` | View | Dashboard showing words dictated, WPM, streaks, dictation mode switcher, and activity. |
-| `src/components/HistoryView.tsx` | View | Transcription session history, audio playback, AI summarization, retry, and deletion. |
-| `src/components/SettingsView.tsx` | View | Hardware mode selector (GPU/CPU), hotkey configuration, mic selector, and tone matrix. |
-| `src/components/DictionaryView.tsx` | View | Custom vocabulary replacements (exact match and fuzzy sound-alike tokens). |
-| `src/components/ToneView.tsx` | View | Manages tone profiles (Casual, Standard, Professional) and per-app tone assignments. |
-| `src/components/FirstRunView.tsx` | Onboarding | 7-stage interactive onboarding wizard for first-time setup and hotkey training. |
-| `src/components/StageIndicator.tsx` | UI Component | Progress track indicator for the onboarding flow. |
-| `src/components/FloatingCapsule.tsx` | Overlay UI | The floating pill showing recording waves, transcribing progress, and paste status. |
-| `src/components/Sidebar.tsx` | Navigation | Sidebar navigation between Home, History, Dictionary, Tone, and Settings views. |
-| `src/components/HotkeyBadge.tsx` | UI Component | Visual keyboard keycaps for hotkeys with pressed-state animations. |
-| `src/components/SoundwaveVisualizer.tsx` | Visualizer | Reactive audio waveform animation while recording audio. |
-| `src/components/IvyLaunchIntro.tsx` | Intro Effect | Cinematic splash/launch logo animation on initial launch. |
-| `src/components/IvyLogo.tsx` | Asset Component | Vector SVG logo mark. |
-| `src/components/IvyWordmark.tsx` | Asset Component | Vector SVG brand wordmark. |
-| `src/components/GlassParticles.tsx` | Canvas Effect | Ambient floating glass particle effect for the main window background. |
-| `src/components/AtmosphericDust.tsx` | Canvas Effect | Ambient dust mote simulation for visual depth. |
-| `src/services/audioFeedback.ts` | Audio Service | Synthesizes auditory feedback sounds for recording start, stop, success, and error. |
-| `src/utils/audio.ts` | Audio Utility | Web Audio API sound synthesizer and tone generator. |
-| `src/types.ts` | Type Definitions | TypeScript interfaces matching backend models (`SettingsConfig`, `DictationSession`, `UserStats`). |
-| `src/defaults.ts` | Default State | Initial fallback data and default user settings. |
-| `src/stats.ts` | Analytics Helper | Calculations for streak tracking, word counts, and WPM rates. |
-| `src/index.css` | Styling | Global Tailwind styles, custom animations, and glassmorphism styling. |
-
----
-
-### B. Backend (Rust Native Engine & AI Pipeline)
-
-The backend resides in `src-tauri/` and executes all OS integrations, audio capture, and local neural network execution.
-
-| Path | Subsystem | Purpose |
-| :--- | :--- | :--- |
-| `src-tauri/src/main.rs` | Windows Entry Point | Configures WebView2 runtime flags (e.g. `--autoplay-policy=no-user-gesture-required`) and starts `app_lib::run()`. |
-| `src-tauri/src/lib.rs` | Core & IPC Controller | Tauri v2 setup, system tray, global shortcut listener, IPC command registration, and Win32 clipboard injection. |
-| `src-tauri/src/voxtral.rs` | Multimodal Engine | Voxtral Mini 3B 2507 + Ivy LoRA via `llama-cpp-2` (Vulkan GPU/CPU): end-to-end speech-to-corrected-text, plus LoRA-off Touch Up & Summarization. |
-| `src-tauri/src/stt.rs` | Fallback STT | Whisper large-v3-turbo int8 ONNX inference via `ort` (fixed 30s encoder window), DirectML GPU acceleration with automatic CPU fallback. |
-| `src-tauri/src/cleanup.rs` | Fallback Cleanup | Deterministic cleanup wrapper for Whisper fallback path (rules-only). |
-| `src-tauri/src/rulebooks/` | Rulebooks Pipeline | 9 deterministic post-processing rulebooks (Commands, Tone, Tech, Numbers, Names, Typography, etc.). |
-| `src-tauri/src/gpu_monitor.rs` | Hardware Telemetry | DXGI video adapter telemetry, VRAM usage tracking, idle eviction state, and Windows power detection. |
-| `src-tauri/Cargo.toml` | Dependencies | Cargo manifest declaring native dependencies (`tauri`, `ort`, `llama-cpp-2`, `cpal`, `windows`, `serde`). |
-| `src-tauri/tauri.conf.json` | Tauri Configuration | Window definitions (`main` and `capsule`), bundle identifiers, and security boundaries. |
-| `src-tauri/capabilities/default.json` | Security Capabilities | Tauri v2 security ACL defining allowed commands for frontend windows. |
-| `src-tauri/.cargo/config.toml` | Compiler Flags | MSVC compiler flags (`/FS`), CMake generator (`Ninja`) for compiling llama.cpp bindings, and the Cargo `target-dir`. |
-| `src-tauri/models/` | Neural Models | Offline model weights: Voxtral Mini 3B (`voxtral-ivy/Voxtral-Mini-3B-2507-Q4_K_M.gguf`, `mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf`, `ivy-lora.gguf`) and fallback Whisper ONNX (`whisper/`). |
-| `src-tauri/installer/` | Packaging Scripts | NSIS installer script (`wrapper.nsi`) and hook definitions (`hooks.nsh`) for single-executable distribution. |
-| `src-tauri/icons/` | Application Icons | Windows `.ico`, macOS `.icns`, Android/iOS mipmaps, and PNG icons. |
-| `src-tauri/tests/fixtures/` | Test Samples | Audio test samples (`sample.wav`, `real_speech_sample.wav`) and fixture generation script (`generate_sample.ps1`). |
-
----
-
-### C. Build Tools & DevOps (Fullstack Glue)
+### Rust core (`src-tauri/`)
 
 | Path | Purpose |
-| :--- | :--- |
-| `package.json` | Project scripts (`npm run tauri dev`, `npm run build`, `npm run setup-models`, `npm run package-installer`) and dependencies. |
-| `vite.config.ts` | Multi-page Vite configuration bundling both `index.html` (Main UI) and `capsule.html` (Overlay UI). |
-| `tsconfig.json` | TypeScript compiler options. |
-| `scripts/download-models.mjs` | Node.js script fetching Voxtral Mini 3B GGUF and fallback Whisper ONNX models from Hugging Face. |
-| `scripts/package-installer.mjs` | Packaging script for single-file installer distribution. |
-| `scripts/generate-checksums.ps1` | PowerShell script generating release file SHA-256 verification hashes. |
-| `.github/workflows/` | GitHub Actions CI/CD workflows for CodeQL static analysis, secret scanning, dependency reviews, and automated builds. |
-| `SECURITY.md` | Threat model, memory zeroization documentation, and vulnerability reporting guidelines. |
-| `IVY.md` & `README.md` | Core engineering documentation, session memory, and quick start guides. |
+|---|---|
+| `src/main.rs` | Entry point. Sets one WebView2 flag (autoplay for the launch sound) and starts `app_lib::run()`. |
+| `src/lib.rs` | App setup, tray, hotkeys, the dictation pipeline, IPC commands, settings, History, the paste. |
+| `src/lite.rs` | Loads the speech model and transcribes. Picks GPU (Vulkan) or CPU. |
+| `src/audio.rs` | Microphone capture, resampling to 16 kHz, quiet-microphone boost. |
+| `src/rulebooks/` | The formatting books (see [RULEBOOKS.md](RULEBOOKS.md)). |
+| `src/spellcheck.rs` | Touch Up: fixes misspelled words only, never rewrites. |
+| `src/gpu_monitor.rs` | Watches GPU load and full-screen apps, so Ivy steps aside for games; battery detection. |
+| `src/modifier_hotkey.rs` | The Ctrl + Shift hotkey, which Windows can't register as a normal hotkey. |
+| `tauri.conf.json` | Windows, Content Security Policy (local content only), installer settings. |
+| `capabilities/default.json` | Which Tauri permissions the interface gets (window basics only). |
+| `installer/hooks.nsh` | Installer steps: copy the model from next to the setup file, ask before deleting data on uninstall. |
+| `vendor/llama-cpp-sys-2/` | Vendored llama.cpp bindings with one patch (search for "IVY PATCH"). |
+| `data/en-80k.txt` | Word list for Touch Up (MIT). |
+| `tests/fixtures/` | Synthesized test audio (no real voices). |
 
----
+### Interface (`src/`)
 
-## 3. Inter-Process Communication (IPC) Interface
+| Path | Purpose |
+|---|---|
+| `App.tsx` | Main window: views, window controls, settings. |
+| `CapsuleWindow.tsx`, `components/FloatingCapsule.tsx` | The dictation bar. |
+| `components/HomeView.tsx` | Stats and activity. |
+| `components/HistoryView.tsx` | Recent dictations: copy, retry, Touch Up, download the recording, delete. |
+| `components/DictionaryView.tsx` | Personal dictionary and Snippets. |
+| `components/ToneView.tsx` | Tones and per-app tones. |
+| `components/SettingsView.tsx` | Hotkey, microphone, GPU/CPU, startup. |
+| `components/FirstRunView.tsx` | First-run setup wizard with a microphone test. |
 
-### Native Commands (`invoke`)
-The frontend calls these commands via `@tauri-apps/api/core`:
+### Build and release
 
-| Command | Arguments | Return Type | Description |
-| :--- | :--- | :--- | :--- |
-| `start_manual_dictation` | None | `void` | Starts microphone recording from the onboarding or UI trigger. |
-| `stop_manual_dictation` | None | `void` | Stops recording and begins transcription pipeline. |
-| `cancel_dictation` | None | `void` | Aborts current recording/transcription and purges buffers. |
-| `list_audio_input_devices`| None | `Vec<String>` | Enumerates available system microphones via CPAL. |
-| `get_settings` | None | `SettingsConfig` | Loads user configuration from `settings.json`. |
-| `save_settings` | `settings: SettingsConfig` | `Result<(), String>` | Persists updated user configuration to disk. |
-| `get_history` | None | `Vec<DictationSession>` | Fetches local transcription history list. |
-| `delete_history_entry` | `id: String` | `Result<(), String>` | Deletes specific transcript and corresponding `.wav` audio. |
-| `clear_all_history` | None | `Result<(), String>` | Clears all stored transcripts and audio files. |
-| `get_user_stats` | None | `UserStats` | Loads anonymized productivity stats (`stats.json`). |
-| `retry_transcription` | `id: String` | `Result<RetryResult, String>` | Re-runs STT and cleanup on a previous audio session. |
-| `summarize_transcript` | `id: String` | `Result<String, String>` | Generates an AI summary via local Voxtral Mini 3B. |
-| `touch_up_transcript` | `id: String` | `Result<String, String>` | Runs AI proofread & style cleanup via local Voxtral Mini 3B. |
-| `extract_audio` | `id: String` | `Result<String, String>` | Exports session audio to user's Downloads directory. |
-| `repaste_transcript` | `text: String` | `Result<bool, String>` | Injects transcript text into target window via simulated paste. |
-| `get_active_context` | None | `ActiveContext` | Detects currently focused foreground application window. |
-| `get_hardware_status` | None | `HardwareStatusDto` | Returns GPU VRAM usage and adapter telemetry. |
-| `apply_hardware_mode` | None | `void` | Switches between GPU DirectML acceleration and CPU execution. |
-| `trigger_undo_paste` | None | `void` | Sends synthetic `Ctrl+Z` to reverse last paste operation. |
-| `minimize_main` | None | `void` | Minimizes main app window. |
-| `toggle_maximize_main` | None | `void` | Toggles maximized state of main window. |
-| `close_main` | None | `void` | Minimizes main window to system tray. |
-| `show_main_window` | None | `void` | Restores and brings main window to front. |
-| `hide_capsule_window` | None | `void` | Hides the floating capsule overlay window. |
+| Path | Purpose |
+|---|---|
+| `scripts/download-models.mjs` | For source builds: downloads the model from the GitHub release and checks its SHA-256. |
+| `scripts/package-installer.mjs` | Builds the installer and the release folder (setup + model files + `SHA256SUMS.txt`). |
+| `.github/workflows/` | CodeQL, Gitleaks, cargo/npm audit, Dependency Review, OpenSSF Scorecard, a Windows build check. |
 
----
+## IPC commands
 
-## 4. Security & Privacy Model
+The interface calls these with `invoke()`. Commands that take a History `id` check it against a strict
+allow-list (letters, digits, `-`, `_`) and confirm any file path stays inside Ivy's own audio folder.
 
-1. **Zero Cloud Leakage:** All speech recognition and AI processing (Voxtral Mini 3B multimodal GGUF, fallback Whisper ONNX) run entirely in-process on the local machine.
-2. **Audio RAM Zeroization:** Raw PCM audio sample buffers in memory (`Vec<f32>`) are actively overwritten with zeros (`fill(0.0)`) upon completion or cancellation to prevent residual audio in unallocated memory.
-3. **Daily Auto-Purge:** Audio recordings (`.wav`) and session text transcripts are automatically deleted after 24 hours.
-4. **Strict IPC Validation:** Native Tauri IPC handlers validate all session identifiers to prevent directory traversal attacks.
+| Command | What it does |
+|---|---|
+| `get_settings`, `save_settings` | Read and save settings (validated before saving). |
+| `get_history`, `delete_history_entry`, `clear_all_history` | History. |
+| `retry_transcription`, `touch_up_transcript`, `extract_audio` | Act on one History entry. |
+| `repaste_transcript` | Paste a History entry again (rate-limited, length-capped). |
+| `get_user_stats` | Word counts and streaks (numbers only). |
+| `start_manual_dictation`, `stop_manual_dictation`, `cancel_dictation` | Dictation from the interface. |
+| `pause_ivy`, `resume_ivy`, `get_pause` | Pause Ivy. |
+| `trigger_undo_paste` | Undo the last paste. |
+| `get_active_context` | The app you're dictating into (for per-app tones). |
+| `list_audio_input_devices` | Microphones. |
+| `get_hardware_status`, `apply_hardware_mode` | GPU/CPU status and switching. |
+| `minimize_main`, `toggle_maximize_main`, `close_main`, `show_main_window`, `hide_capsule_window`, `set_wizard_active` | Windows. |
+
+## Security and privacy
+
+See [SECURITY.md](SECURITY.md) for the full model. In short: no network calls, a strict local-only Content
+Security Policy, audio wiped from memory after each dictation, History deleted after 24 hours, and pastes
+only into the window you dictated into.

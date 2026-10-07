@@ -226,18 +226,20 @@ fn resample_to_16k(samples: &[f32], source_rate: u32) -> Vec<f32> {
         }
     };
 
-    let mut padded = samples.to_vec();
-    let remainder = padded.len() % chunk_size;
+    let mut padded = Wiped(samples.to_vec());
+    let remainder = padded.0.len() % chunk_size;
     if remainder != 0 {
-        padded.resize(padded.len() + (chunk_size - remainder), 0.0);
+        padded.0.resize(padded.0.len() + (chunk_size - remainder), 0.0);
     }
 
-    let mut out = Vec::with_capacity(padded.len() * TARGET_SAMPLE_RATE as usize / source_rate as usize + 16);
-    for chunk in padded.chunks(chunk_size) {
-        match resampler.process(&[chunk.to_vec()], None) {
+    let mut out = Vec::with_capacity(padded.0.len() * TARGET_SAMPLE_RATE as usize / source_rate as usize + 16);
+    for chunk in padded.0.chunks(chunk_size) {
+        let mut input = [chunk.to_vec()];
+        match resampler.process(&input, None) {
             Ok(mut result) => out.append(&mut result[0]),
             Err(e) => log::error!("Ivy: resample chunk failed: {e}"),
         }
+        zeroize_samples(&mut input[0]);
     }
     out
 }
@@ -276,6 +278,17 @@ pub fn normalize_audio(samples: &[f32]) -> Vec<f32> {
 /// Zeroizes an in-memory audio sample slice to prevent sensitive recorded speech from lingering in memory.
 pub fn zeroize_samples(samples: &mut [f32]) {
     samples.fill(0.0);
+    // Keeps the compiler from dropping the zeroing as a dead store before the memory is freed.
+    std::hint::black_box(&*samples);
+}
+
+/// An intermediate copy of the audio that is zeroed when it goes out of scope, on every return path.
+pub struct Wiped(pub Vec<f32>);
+
+impl Drop for Wiped {
+    fn drop(&mut self) {
+        zeroize_samples(&mut self.0);
+    }
 }
 
 // Real check for the thread-handoff redesign above: starts and stops actual

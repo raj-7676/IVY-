@@ -77,8 +77,8 @@ the user wrote something they never said.
 - Training data for Ivy's own models follows the same idea: a voice clip is only used when an independent recognizer hears the same words (`gen_clone.py`, Whisper check, WER ≤ 0.3).
 
 ### Upgrade path (measured best, not built yet)
-- **Silero VAD** instead of the energy detector. It is the method in the ICASSP 2025 result; it's ONNX and Ivy already ships onnxruntime.
-- **No-speech probability from Whisper's first decoder step**, combined with the VAD and not used alone.
+- **Silero VAD** instead of the energy detector. It is the method in the ICASSP 2025 result. It's an ONNX model, so it would add an ONNX runtime to Ivy (Ivy no longer ships one).
+- **A no-speech probability from the speech model**, combined with the VAD and not used alone.
 
 ---
 

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.4"
+version = "0.1.5"
 description = "Ivy - offline voice dictation"
 authors = ["Yash"]
 license = "MIT"
@@ -21,7 +21,7 @@ tauri-build = { version = "2.6.3", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3", features = ["protocol-asset", "tray-icon"] }
+tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
@@ -41,11 +41,8 @@ windows = { version = "0.58", features = [
   "Win32_Graphics_Dwm",
 ] }
 
-# Real multimodal STT & cleanup (Voxtral Mini 3B via llama.cpp mtmd) and fallback
-# STT (Whisper large-v3-turbo ONNX) — see src/voxtral.rs, src/stt.rs, src/audio.rs.
-# Whisper-compatible log-mel spectrogram frontend (real, published crate —
-# matches whisper.cpp/pytorch/librosa reference output; avoids hand-rolling
-# STFT + mel filterbank code).
+# Microphone capture and resampling (src/audio.rs), and the lite speech model through llama.cpp's
+# mtmd audio support (src/lite.rs).
 cpal = "0.18"
 rubato = "0.16"
 llama-cpp-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }

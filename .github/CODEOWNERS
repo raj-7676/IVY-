@@ -14,10 +14,12 @@
 /src-tauri/tauri.conf.json @raj-7676
 /src-tauri/src/lib.rs @raj-7676
 /src-tauri/src/audio.rs @raj-7676
-/src-tauri/src/stt.rs @raj-7676
-/src-tauri/src/cleanup.rs @raj-7676
+/src-tauri/src/lite.rs @raj-7676
 /src-tauri/Cargo.toml @raj-7676
 /src-tauri/Cargo.lock @raj-7676
+/src-tauri/installer/ @raj-7676
+/src-tauri/vendor/ @raj-7676
+/index.html @raj-7676
 
 # Frontend Build & Package Dependencies
 /package.json @raj-7676

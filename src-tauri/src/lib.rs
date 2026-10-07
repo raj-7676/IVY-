@@ -179,10 +179,48 @@ struct LastPaste {
     target_hwnd: isize,
     // What the clipboard held immediately before Ivy's paste overwrote it —
     // restored on undo so the user's own prior clipboard item isn't lost.
-    // `None` if the clipboard was empty or held non-text content.
-    previous_clipboard: Option<String>,
+    previous_clipboard: SavedClipboard,
 }
 static LAST_PASTE: Mutex<Option<LastPaste>> = Mutex::new(None);
+
+/// The user's clipboard from before Ivy swapped a transcript in: text, an image (a screenshot) or
+/// copied files, so none of them is lost by dictating. Other formats (rich text, HTML) come back as
+/// their plain text.
+#[derive(Clone)]
+enum SavedClipboard {
+    Empty,
+    Text(String),
+    Image(arboard::ImageData<'static>),
+    Files(Vec<std::path::PathBuf>),
+}
+
+impl SavedClipboard {
+    fn capture() -> Self {
+        let Ok(mut c) = arboard::Clipboard::new() else { return Self::Empty };
+        if let Ok(files) = c.get().file_list() {
+            if !files.is_empty() {
+                return Self::Files(files);
+            }
+        }
+        if let Ok(text) = c.get_text() {
+            return Self::Text(text);
+        }
+        if let Ok(image) = c.get_image() {
+            return Self::Image(image);
+        }
+        Self::Empty
+    }
+
+    fn restore(self) {
+        let Ok(mut c) = arboard::Clipboard::new() else { return };
+        let _ = match self {
+            Self::Empty => c.clear(),
+            Self::Text(text) => c.set_text(text),
+            Self::Image(image) => c.set_image(image),
+            Self::Files(files) => c.set().file_list(&files),
+        };
+    }
+}
 
 fn default_glass_opacity() -> f64 {
     90.0
@@ -286,10 +324,52 @@ fn snippet_key(s: &str) -> String {
         .join(" ")
 }
 
-/// The whole dictation must be the trigger (Yash, 2026-10-06): "check my email" stays as said.
-fn apply_snippets(text: &str, snippets: &[Snippet]) -> Option<String> {
+/// Swaps each trigger for its saved text anywhere in the dictation (Yash, 2026-10-07: "send it to my
+/// mail" must work). Whole words only, case and punctuation ignored; the UI asks for triggers nobody
+/// says by accident. A dictation that is only the trigger becomes exactly the saved text.
+fn apply_snippets(text: &str, snippets: &[Snippet]) -> String {
     let said = snippet_key(text);
-    snippets.iter().find(|s| !said.is_empty() && snippet_key(&s.trigger) == said).map(|s| s.text.clone())
+    if let Some(s) = snippets.iter().find(|s| !said.is_empty() && snippet_key(&s.trigger) == said) {
+        return s.text.clone();
+    }
+    // Longest trigger first, so "my email address" wins over "my email".
+    let mut triggers: Vec<(Vec<String>, &str)> = snippets
+        .iter()
+        .map(|s| (snippet_key(&s.trigger).split_whitespace().map(String::from).collect::<Vec<_>>(), s.text.as_str()))
+        .filter(|(words, _)| !words.is_empty())
+        .collect();
+    triggers.sort_by_key(|(words, _)| std::cmp::Reverse(words.len()));
+    // Byte spans of the words, using snippet_key's idea of a word (a run of letters/digits).
+    let mut words: Vec<(usize, usize)> = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        if c.is_alphanumeric() {
+            start.get_or_insert(i);
+        } else if let Some(s) = start.take() {
+            words.push((s, i));
+        }
+    }
+    if let Some(s) = start {
+        words.push((s, text.len()));
+    }
+    let mut out = String::with_capacity(text.len());
+    let (mut copied, mut i) = (0, 0);
+    while i < words.len() {
+        let hit = triggers.iter().find(|(tw, _)| {
+            i + tw.len() <= words.len() && tw.iter().zip(&words[i..]).all(|(t, &(a, b))| text[a..b].to_lowercase() == *t)
+        });
+        match hit {
+            Some((tw, body)) => {
+                out.push_str(&text[copied..words[i].0]);
+                out.push_str(body);
+                copied = words[i + tw.len() - 1].1;
+                i += tw.len();
+            }
+            None => i += 1,
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
 }
 
 impl Default for SettingsConfig {
@@ -695,7 +775,12 @@ fn models_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
             }
         }
     }
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")
+    // The source tree is only a fallback for dev builds: a release exe must never load a model from a
+    // build machine's path that might exist (and be writable) on someone else's PC.
+    if cfg!(debug_assertions) {
+        return std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
+    }
+    app.path().resource_dir().unwrap_or_default().join("models")
 }
 
 fn format_timestamp(epoch_ms: i64) -> String {
@@ -735,25 +820,11 @@ fn format_duration(seconds: f64) -> String {
 }
 
 fn load_settings(app: &tauri::AppHandle) -> SettingsConfig {
-    let mut config: SettingsConfig = fs::read_to_string(settings_path(app))
+    // GPU or CPU is chosen in the setup wizard; the installer no longer asks (Yash, 2026-10-07).
+    fs::read_to_string(settings_path(app))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-
-    if let Ok(dir) = app.path().app_data_dir() {
-        let pref_file = dir.join("hardware_preference.txt");
-        if pref_file.exists() {
-            if let Ok(pref) = fs::read_to_string(&pref_file) {
-                let p = pref.trim().to_lowercase();
-                if p == "gpu" || p == "cpu" {
-                    log::info!("Ivy: Applying installer hardware preference: {p}");
-                    config.hardware_mode = p;
-                }
-            }
-            let _ = fs::remove_file(pref_file);
-        }
-    }
-    config
+        .unwrap_or_default()
 }
 
 fn load_history(app: &tauri::AppHandle) -> Vec<DictationSession> {
@@ -1117,6 +1188,16 @@ fn validate_settings(s: &SettingsConfig) -> Result<(), String> {
             return Err("personal dictionary word exceeds maximum length (100 chars)".into());
         }
     }
+    if s.preset_apps.len() > 3
+        || s.preset_apps.iter().any(|(tone, apps)| {
+            !valid_tones.contains(&tone.as_str()) || apps.len() > 200 || apps.iter().any(|a| a.len() > 256)
+        })
+    {
+        return Err("Per-app tones: up to 200 apps per tone, 256 characters each.".into());
+    }
+    if s.available_mics.len() > 64 || s.available_mics.iter().any(|m| m.len() > 256) {
+        return Err("microphone list too long".into());
+    }
     Ok(())
 }
 
@@ -1324,12 +1405,14 @@ fn transcribe_and_clean(
 ) -> String {
     let prefer_gpu = should_use_gpu(app);
     // Quiet microphones: peak-normalise so soft voices reach the model at a usable level (audio::normalize_audio).
-    let normalized = audio::normalize_audio(samples);
-    let stt_samples = if normalized.is_empty() { samples } else { &normalized };
+    // Both audio copies here are zeroed when this function returns (audio::Wiped).
+    let normalized = audio::Wiped(audio::normalize_audio(samples));
+    let stt_samples = if normalized.0.is_empty() { samples } else { &normalized.0 };
 
     // Hallucinations book, stage A (src/rulebooks/hallucinations.rs): no voice -> no text. The model gets the
     // full audio (not the pause-squeezed copy): squeezing pauses dropped the end of long dictations (Task 6 Bug B).
-    let (_voiced_audio, voice) = rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
+    let (voiced_audio, voice) = rulebooks::hallucinations::prepare_audio(stt_samples, 16000);
+    drop(audio::Wiped(voiced_audio));
     if voice.voiced_secs < 0.25 {
         debug_log(app, &format!("no speech detected ({:.2}s voiced of {:.2}s) — nothing transcribed", voice.voiced_secs, voice.total_secs));
         return String::new();
@@ -1372,11 +1455,9 @@ fn transcribe_and_clean(
     if raw.is_empty() {
         return raw;
     }
-    if let Some(snippet) = apply_snippets(&raw, &settings.snippets) {
-        return snippet; // typed exactly as saved, no tone or formatting
-    }
     let formatted = rulebooks::after_model(&raw, rulebooks::Tone::from_label(tone_preset));
-    apply_personal_dictionary(&formatted, &dictionary)
+    // Snippets go last, so tone, formatting and the dictionary never touch the saved text.
+    apply_snippets(&apply_personal_dictionary(&formatted, &dictionary), &settings.snippets)
 }
 
 fn levenshtein(a: &str, b: &str) -> usize {
@@ -2579,10 +2660,8 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
     }
     // Read before overwriting — this is the one and only chance to know
     // what the clipboard held before Ivy clobbered it, needed to restore it
-    // on undo. Best-effort: `None` for an empty clipboard or non-text
-    // content (an image, a file selection) — undo then just clears the
-    // clipboard on restore rather than fabricating something to put back.
-    let previous_clipboard = arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok();
+    // afterwards and on undo.
+    let previous_clipboard = SavedClipboard::capture();
     let expected_text = text.clone();
     // A target app can still swallow a Ctrl+V that SendInput reports as sent,
     // so Alt+V must always be able to re-paste the latest transcript.
@@ -2592,8 +2671,11 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
     #[cfg(windows)]
     unsafe {
         // Re-check right before sending keys — the sleep above is enough
-        // time for focus to have moved again since the check above.
+        // time for focus to have moved again since the check above. Put the
+        // user's clipboard back now: the transcript must not be left on it
+        // (Alt+V still has it in MANUAL_PASTE_TEXT).
         if GetForegroundWindow().0 as isize != target {
+            previous_clipboard.restore();
             return false;
         }
     }
@@ -2622,11 +2704,8 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                 if let Ok(curr) = clipboard.get_text() {
                     if curr == expected_text {
-                        if let Some(prev) = previous_clipboard {
-                            let _ = clipboard.set_text(prev);
-                        } else {
-                            let _ = clipboard.clear();
-                        }
+                        drop(clipboard);
+                        previous_clipboard.restore();
                         log::debug!("Ivy: restored the real clipboard after auto-paste");
                     }
                 }
@@ -3246,9 +3325,7 @@ fn undo_last_paste(app: &tauri::AppHandle) {
         // Focus moved to a different app since the paste — sending Ctrl+Z
         // blindly could undo that app's own unrelated work. Only restore
         // the clipboard, which is always safe, and stop there.
-        if let Some(prev) = last.previous_clipboard {
-            let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(prev));
-        }
+        last.previous_clipboard.restore();
         debug_log(app, "undo-paste: foreground app changed, restored clipboard only");
         position_capsule_window(app);
         bridge_capsule_show(app, true);
@@ -3261,11 +3338,7 @@ fn undo_last_paste(app: &tauri::AppHandle) {
 
     let sent = send_ctrl_key(0x5A); // VK_Z
 
-    if let Some(prev) = last.previous_clipboard {
-        let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(prev));
-    } else if let Ok(mut clipboard) = arboard::Clipboard::new() {
-        let _ = clipboard.clear();
-    }
+    last.previous_clipboard.restore();
 
     debug_log(app, &format!("undo-paste: sent Ctrl+Z to target window ({sent})"));
     position_capsule_window(app);
@@ -3328,7 +3401,7 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
 
     // Read before overwriting — this is the one and only chance to know
     // what the clipboard held before Ivy temporarily swaps it out.
-    let previous_clipboard = arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok();
+    let previous_clipboard = SavedClipboard::capture();
     if arboard::Clipboard::new().is_ok() {
         if set_clipboard_private(&text).is_err() {
             debug_log(app, "manual-paste: couldn't access the clipboard");
@@ -3402,11 +3475,8 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                 if let Ok(curr) = clipboard.get_text() {
                     if curr == expected_text {
-                        if let Some(prev) = previous_clipboard {
-                            let _ = clipboard.set_text(prev);
-                        } else {
-                            let _ = clipboard.clear();
-                        }
+                        drop(clipboard);
+                        previous_clipboard.restore();
                         debug_log(&app_handle, "manual-paste: restored the real clipboard");
                         return;
                     }
@@ -3880,12 +3950,23 @@ mod tests {
     }
 
     #[test]
-    fn snippets_only_replace_a_dictation_that_is_just_the_trigger() {
-        let snips = vec![Snippet { trigger: "my email".into(), text: "yash@example.com".into() }];
-        assert_eq!(apply_snippets("My email.", &snips).as_deref(), Some("yash@example.com"));
-        assert_eq!(apply_snippets("  my EMAIL ", &snips).as_deref(), Some("yash@example.com"));
-        assert_eq!(apply_snippets("Check my email.", &snips), None);
-        assert_eq!(apply_snippets("", &snips), None);
+    fn snippets_replace_the_trigger_anywhere_as_whole_words() {
+        let snips = vec![
+            Snippet { trigger: "my email".into(), text: "yash@example.com".into() },
+            Snippet { trigger: "My email address".into(), text: "work@example.com".into() },
+        ];
+        // The whole dictation is the trigger: exactly the saved text, no full stop.
+        assert_eq!(apply_snippets("My email.", &snips), "yash@example.com");
+        assert_eq!(apply_snippets("  my EMAIL ", &snips), "yash@example.com");
+        // Inside a sentence, the punctuation around it is kept.
+        assert_eq!(apply_snippets("Can you send that to my email?", &snips), "Can you send that to yash@example.com?");
+        assert_eq!(apply_snippets("My email, please.", &snips), "yash@example.com, please.");
+        // Longest trigger wins.
+        assert_eq!(apply_snippets("Use my email address here.", &snips), "Use work@example.com here.");
+        // Whole words only; everything else is untouched.
+        assert_eq!(apply_snippets("Check my emails.", &snips), "Check my emails.");
+        assert_eq!(apply_snippets("", &snips), "");
+        assert_eq!(apply_snippets("Héllo my email, ok", &snips), "Héllo yash@example.com, ok");
     }
 
     #[test]

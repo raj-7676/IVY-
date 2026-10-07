@@ -15,29 +15,7 @@
     IfSilent model_done
     MessageBox MB_OK|MB_ICONEXCLAMATION "Ivy's speech model files were not found next to this installer.$\r$\n$\r$\nPut ivy-lite-Q8_0.gguf and mmproj-ivy-lite-f16.gguf in the same folder as the setup file and run it again.$\r$\n$\r$\nIvy is installed, but it can't transcribe until those two files are in:$\r$\n$INSTDIR\models\ivy-lite"
   model_done:
-
-  ; Silent/unattended installs (winget, Chocolatey, MDM, or Tauri's own
-  ; updater re-running this installer) must never block on a modal dialog.
-  IfSilent finish_hw_gpu
-
-  ; GPU or CPU. Text is a single unbroken string: NSIS has no line continuation inside quoted
-  ; MessageBox arguments. Timings are measured lite numbers (IVY.md, section 23).
-  MessageBox MB_YESNO|MB_ICONQUESTION "How should Ivy run on this PC?$\r$\n$\r$\n[YES] GPU (recommended if you have a graphics card)$\r$\n  Uses your graphics card (NVIDIA, AMD or Intel, through Vulkan).$\r$\n  A 1-minute dictation is ready in about 2 seconds.$\r$\n$\r$\n[NO] CPU (works on any PC)$\r$\n  No graphics card needed.$\r$\n  A 1-minute dictation takes about 10 to 20 seconds.$\r$\n$\r$\nYou can change this any time in Settings > Hardware." IDYES finish_hw_gpu IDNO finish_hw_cpu
-
-  finish_hw_gpu:
-    CreateDirectory "$APPDATA\app.ivy.dictation"
-    FileOpen $0 "$APPDATA\app.ivy.dictation\hardware_preference.txt" w
-    FileWrite $0 "gpu"
-    FileClose $0
-    Goto finish_hw
-
-  finish_hw_cpu:
-    CreateDirectory "$APPDATA\app.ivy.dictation"
-    FileOpen $0 "$APPDATA\app.ivy.dictation\hardware_preference.txt" w
-    FileWrite $0 "cpu"
-    FileClose $0
-
-  finish_hw:
+  ; GPU or CPU is chosen in the app's setup wizard (and Settings), not here.
 !macroend
 
 ; The model files were copied in by the hook above, so Tauri's uninstaller doesn't know about them.

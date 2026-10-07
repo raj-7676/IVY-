@@ -8,14 +8,11 @@ title = "IVY Transcriber Gitleaks Config"
 useDefault = true
 
 [allowlist]
-description = "Global allowlist for benign test fixtures and documentation"
+description = "Lockfiles (package checksums) and synthesized test audio only; docs are scanned too"
 paths = [
-  '''^\.planning/''',
-  '''^tests/fixtures/''',
+  '''^src-tauri/tests/fixtures/''',
   '''package-lock\.json$''',
-  '''Cargo\.lock$''',
-  '''SECURITY\.md$''',
-  '''IVY\.md$'''
+  '''Cargo\.lock$'''
 ]
 regexes = [
   '''example\.com''',

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Sparkles, ArrowRight } from 'lucide-react';
 import { DictationSession, ScreenState, UserStats } from '../types';
 import { computeStats, greeting } from '../stats';
@@ -47,13 +47,19 @@ export const HomeView: React.FC<HomeViewProps> = ({ sessions, userStats, hotkey,
   const stats = useMemo(() => computeStats(userStats ?? EMPTY_STATS), [userStats]);
   const recent = sessions.slice(0, 4);
   const peakDay = Math.max(1, ...stats.recentDaily.map((d) => d.words));
+  // Ivy stays open in the tray all day, so the greeting must follow the clock, not the first render.
+  const [hello, setHello] = useState(() => greeting());
+  useEffect(() => {
+    const id = setInterval(() => setHello(greeting()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <div id="screen-home" className="flex-1 flex flex-col h-full overflow-y-auto">
       <div className="px-8 pt-7 pb-10 space-y-8">
         <div>
           <h1 className="text-[24px] font-semibold tracking-tight text-white/95">
-            {greeting()}
+            {hello}
           </h1>
           <p className="text-[12.5px] text-white/40 mt-1.5">
             Hold{' '}

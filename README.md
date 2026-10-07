@@ -57,10 +57,10 @@ paragraphs full of corrections.
 - **Per-app tones:** add apps to a tone (for example Slack to Casual and Outlook to Professional), and Ivy switches automatically.
 - **Touch Up:** after a paste, one click fixes spelling mistakes. It only corrects misspelled words and never rewrites your sentences.
 - **Personal dictionary:** teach Ivy names, brands and jargon so it spells them your way.
-- **Snippets:** say a short trigger phrase and Ivy pastes a saved block of text (an address, a signature, a template).
+- **Snippets:** save a trigger phrase and the text it stands for (an address, a signature, a template). Say the trigger anywhere in a sentence and Ivy types the saved text in its place.
 - **Smart number formatting:** "500 rupees" becomes ₹500. Big round amounts are written the readable way, for example "18 lakhs", "2.5 crores" or "2 million".
 - **Quick keys:** **Alt + V** pastes your last dictation again. **Alt + B** undoes the last paste.
-- **History:** your recent dictations, with their audio, are kept on your PC so you can replay or copy them.
+- **History:** your recent dictations, with their audio, are kept on your PC so you can copy them, retry them or download the recording.
 - **Pause:** turn Ivy off for an hour (or up to 24 hours) from the title bar or the tray icon.
 - **GPU or CPU:** runs on any graphics card (NVIDIA, AMD or Intel) or on the processor alone. On battery it switches to CPU to save power.
 - **Plays nice with games:** when a game or full-screen video is in front, Ivy goes to sleep, frees the graphics card and leaves your keys to the game. If another program is working the graphics card hard, Ivy moves to the CPU until it calms down.
@@ -84,11 +84,11 @@ See [SECURITY.md](SECURITY.md) for the security details.
 Ivy installs **FitGirl-repack style**: a small setup file plus the model files, all in one folder.
 
 1. Open the **[latest release](https://github.com/raj-7676/IVY-/releases/latest)** and download **all** of these files into the **same folder**:
-   - `Ivy_0.1.4_x64-setup.exe` (the installer)
+   - `Ivy_0.1.5_x64-setup.exe` (the installer)
    - `ivy-lite-Q8_0.gguf` (the speech model, 1.8 GB)
    - `mmproj-ivy-lite-f16.gguf` (the part of the model that listens, 0.6 GB)
-2. Run `Ivy_0.1.4_x64-setup.exe`. It installs Ivy, copies the model in, and asks whether to use your graphics card (GPU) or processor (CPU).
-3. Ivy opens with a short setup wizard that tests your microphone. Then hold **Alt + Space** and talk.
+2. Run `Ivy_0.1.5_x64-setup.exe`. It installs Ivy and copies the model in.
+3. Ivy opens with a short setup wizard: pick your key, choose GPU (graphics card) or CPU, and test your microphone. Then hold **Alt + Space** and talk.
 
 The model is one model stored as two files, because GitHub allows at most 2 GB per file.
 After installing, you can delete the downloaded folder.
