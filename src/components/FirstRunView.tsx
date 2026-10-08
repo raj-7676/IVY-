@@ -711,8 +711,8 @@ const StepPrivacy: React.FC = () => (
     />
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
       {[
-        { icon: <WifiOff className="w-4 h-4" />, title: '100% offline', body: 'No internet needed. Your voice never goes to a server, an API or a cloud service.', foot: <><Lock className="w-3 h-3" /> No network calls.</> },
-        { icon: <Trash2 className="w-4 h-4" />, title: 'Deleted after 24 hours', body: 'Every recording and transcript is removed automatically after 24 hours.', foot: <><CheckCircle2 className="w-3 h-3" /> Always on.</> },
+        { icon: <WifiOff className="w-4 h-4" />, title: '100% offline', body: 'No internet needed. Your voice never goes to a server, an API or a cloud service.', foot: <><Lock className="w-3 h-3" /> No network calls unless you check for updates.</> },
+        { icon: <Trash2 className="w-4 h-4" />, title: 'Deleted after 24 hours', body: 'Every recording and transcript is removed automatically after 24 hours. Keep it up to 7 days in History if you like.', foot: <><CheckCircle2 className="w-3 h-3" /> Always on.</> },
         { icon: <Eye className="w-4 h-4" />, title: 'Clear anytime', body: 'History has a "Clear all transcriptions" button. Your streak and word count stay.', foot: <><CheckCircle2 className="w-3 h-3" /> Recordings go, progress stays.</> },
         { icon: <HardDrive className="w-4 h-4" />, title: 'Stays on your machine', body: 'History, settings and stats live in your own app folder. No accounts, no telemetry.', foot: <><CheckCircle2 className="w-3 h-3" /> Code is public.</> },
       ].map((c) => (

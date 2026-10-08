@@ -50,6 +50,8 @@ export interface SettingsConfig {
   personalDictionary: string[];
   /** Say the trigger on its own and Ivy types the text instead. */
   snippets: { trigger: string; text: string }[];
+  /** How long history (transcripts + recordings) is kept, 1 to 7 days. */
+  historyDays: number;
   selectedMic: string;
   availableMics: string[];
   /** Main window glass background opacity, 30-95 (%). */

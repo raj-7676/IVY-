@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AlertTriangle, CheckCircle2, Download, RefreshCw, ShieldCheck, VolumeX, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, RefreshCw, ShieldCheck, VolumeX, WifiOff, X } from 'lucide-react';
 import { IvyWordmark } from './IvyWordmark';
 import INTRO_VIDEO from '../assets/ivy-intro.mp4';
 
@@ -182,13 +182,20 @@ const Shell: React.FC<{ tone: 'busy' | 'warn' | 'ok'; children: React.ReactNode 
  * the film pauses with it and carries on where it was when Ivy comes back (Yash: nothing but the transcriber
  * may run in the background). A thin bar keeps the download visible underneath.
  */
-const IntroFilm: React.FC<{ status: ModelStatus; onPlaying: (playing: boolean) => void; onDone: () => void }> = ({
-  status,
-  onPlaying,
-  onDone,
-}) => {
+export const IntroFilm: React.FC<{
+  /** The first-run download, shown as a thin bar; left out when replayed from the title bar. */
+  status?: ModelStatus;
+  onPlaying: (playing: boolean) => void;
+  onDone: () => void;
+  /** Replays (title bar "Intro") can be closed; the first-run showing can't. */
+  skippable?: boolean;
+}> = ({ status, onPlaying, onDone, skippable = false }) => {
   const ref = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(false);
+  // Read through a ref: the download screen re-renders on every progress tick with a new onDone, and the
+  // effect below must not restart (it would leave and re-enter full screen each time).
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -228,7 +235,10 @@ const IntroFilm: React.FC<{ status: ModelStatus; onPlaying: (playing: boolean) =
       v.pause();
     };
     window.addEventListener('ivy:window-hiding', hiding);
+    const esc = (e: KeyboardEvent) => skippable && e.key === 'Escape' && doneRef.current();
+    window.addEventListener('keydown', esc);
     return () => {
+      window.removeEventListener('keydown', esc);
       stopped = true;
       window.clearInterval(timer);
       window.removeEventListener('ivy:window-hiding', hiding);
@@ -236,14 +246,14 @@ const IntroFilm: React.FC<{ status: ModelStatus; onPlaying: (playing: boolean) =
       win?.setFullscreen(false).catch(() => undefined);
       onPlaying(false);
     };
-  }, [onPlaying]);
+  }, [onPlaying, skippable]);
   const soundOn = () => {
     const v = ref.current;
     if (!v) return;
     v.muted = false;
     setMuted(false);
   };
-  const ready = status.state === 'ready';
+  const ready = status?.state === 'ready';
   return (
     <div className="fixed inset-0 z-[80] bg-black flex items-center justify-center select-none" onContextMenu={(e) => e.preventDefault()}>
       <video
@@ -265,12 +275,27 @@ const IntroFilm: React.FC<{ status: ModelStatus; onPlaying: (playing: boolean) =
           Sound on
         </button>
       )}
-      <div className="absolute left-4 bottom-3 text-[11px] font-medium text-white/50">
-        {ready ? 'Speech model downloaded' : `Downloading Ivy's speech model · ${percent(status)}%`}
-      </div>
-      <div className="absolute left-0 right-0 bottom-0 h-[3px] bg-white/10">
-        <div className="h-full bg-[#FF6B00] transition-[width] duration-500" style={{ width: `${ready ? 100 : percent(status)}%` }} />
-      </div>
+      {skippable && (
+        <button
+          type="button"
+          onClick={onDone}
+          title="Close (Esc)"
+          className="absolute top-5 right-5 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 border border-white/15 text-white/80 text-xs font-semibold"
+        >
+          <X className="w-3.5 h-3.5" />
+          Close
+        </button>
+      )}
+      {status && (
+        <>
+          <div className="absolute left-4 bottom-3 text-[11px] font-medium text-white/50">
+            {ready ? 'Speech model downloaded' : `Downloading Ivy's speech model · ${percent(status)}%`}
+          </div>
+          <div className="absolute left-0 right-0 bottom-0 h-[3px] bg-white/10">
+            <div className="h-full bg-[#FF6B00] transition-[width] duration-500" style={{ width: `${ready ? 100 : percent(status)}%` }} />
+          </div>
+        </>
+      )}
     </div>
   );
 };

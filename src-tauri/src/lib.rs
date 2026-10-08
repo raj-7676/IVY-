@@ -14,6 +14,7 @@ mod rulebooks;
 pub(crate) mod gpu_monitor;
 mod modifier_hotkey;
 mod spellcheck;
+mod update;
 pub mod lite;
 
 #[cfg(windows)]
@@ -246,6 +247,10 @@ fn default_onboarding_completed() -> bool {
     false
 }
 
+fn default_history_days() -> u32 {
+    1
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SettingsConfig {
@@ -277,6 +282,9 @@ struct SettingsConfig {
     /// Say a trigger on its own ("my email") and Ivy types the saved text instead.
     #[serde(default)]
     snippets: Vec<Snippet>,
+    /// How long history (transcripts and recordings) is kept: 1 to 7 days, picked in History. 1 = 24 hours.
+    #[serde(default = "default_history_days")]
+    history_days: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -371,6 +379,7 @@ impl Default for SettingsConfig {
             launch_at_startup: default_launch_at_startup(),
             manual_paste_hotkey: default_manual_paste_hotkey(),
             onboarding_completed: default_onboarding_completed(),
+            history_days: default_history_days(),
         }
     }
 }
@@ -525,9 +534,12 @@ fn save_user_stats_atomic(app: &tauri::AppHandle, stats: &UserStats) -> Result<(
     fs::rename(tmp, path).map_err(|e| e.to_string())
 }
 
-// Daily privacy retention: sensitive recordings and transcripts are completely purged every 24 hours.
-// User progress/stats remain permanently decoupled in `stats.json` and are NEVER reset to zero.
-const RETENTION_SECS: i64 = 24 * 60 * 60;
+// Privacy retention: recordings and transcripts are deleted after 24 hours by default, or after up to
+// 7 days if the user picks that in History (Yash, 2026-10-08). User progress/stats stay in `stats.json`
+// and are NEVER reset to zero.
+fn retention_secs(app: &tauri::AppHandle) -> i64 {
+    load_settings(app).history_days.clamp(1, 7) as i64 * 24 * 60 * 60
+}
 
 fn audio_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
     let dir = app.path().app_local_data_dir().expect("no app data dir").join("audio");
@@ -664,11 +676,12 @@ fn save_audio_wav(app: &tauri::AppHandle, id: &str, samples: &[f32]) -> String {
 
 /// Real disk cleanup, not a display filter: deletes both the audio file
 /// AND the history entry (transcript, preview, everything) once it's older
-/// than `RETENTION_SECS` — the app makes no lasting record of what was
+/// than the chosen retention (`retention_secs`) — the app makes no lasting record of what was
 /// said. Called at launch and again on an hourly timer (see `run()`) since
 /// Ivy is designed to keep running for weeks without a restart (the main
 /// window only ever hides on close, never actually quits).
 fn purge_old_history(app: &tauri::AppHandle) {
+    let retention = retention_secs(app);
     let _guard = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut sessions = load_history(app);
     let now = std::time::SystemTime::now()
@@ -677,16 +690,16 @@ fn purge_old_history(app: &tauri::AppHandle) {
         .unwrap_or(0);
     let before = sessions.len();
     for s in &sessions {
-        if s.created_at != 0 && (now - s.created_at) / 1000 > RETENTION_SECS && path_within_audio_dir(app, &s.audio_path) {
+        if s.created_at != 0 && (now - s.created_at) / 1000 > retention && path_within_audio_dir(app, &s.audio_path) {
             let _ = fs::remove_file(&s.audio_path);
         }
     }
-    sessions.retain(|s| s.created_at == 0 || (now - s.created_at) / 1000 <= RETENTION_SECS);
-    // Any recording older than a day, even one history no longer lists, goes too.
+    sessions.retain(|s| s.created_at == 0 || (now - s.created_at) / 1000 <= retention);
+    // Any recording older than that, even one history no longer lists, goes too.
     if let Ok(entries) = fs::read_dir(audio_dir(app)) {
         for entry in entries.flatten() {
             let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok())
-                .map_or(false, |age| age.as_secs() as i64 > RETENTION_SECS);
+                .map_or(false, |age| age.as_secs() as i64 > retention);
             if old {
                 wipe_file(&entry.path());
             }
@@ -1345,6 +1358,10 @@ fn save_settings(app: tauri::AppHandle, settings: SettingsConfig) -> Result<(), 
 
     write_settings_atomic(&app, &settings)?;
     debug_log(&app, &format!("settings saved: hardware={}", settings.hardware_mode));
+    // A shorter history time applies at once, not at the next hourly clean-up.
+    if settings.history_days != old_settings.history_days {
+        purge_old_history(&app);
+    }
     // GPU <-> CPU: load the model in the new place now, so the next dictation isn't the slow first one.
     if settings.hardware_mode != old_settings.hardware_mode {
         lite::unload_engine();
@@ -3755,6 +3772,8 @@ pub fn run() {
             cancel_dictation,
             model_status,
             retry_model_download,
+            update::check_for_update,
+            update::install_update,
         ])
         .setup(move |app| {
             // Was debug-only — meant every `log::info!`/`log::warn!` call

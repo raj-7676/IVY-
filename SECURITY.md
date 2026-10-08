@@ -61,8 +61,11 @@ responding, you may disclose after 90 days.
 
 ## How Ivy protects you
 
-- **No network, except one model download.** Ivy sends nothing anywhere: no telemetry, no analytics, no
-  accounts, no automatic updates. Its only connection is downloading its speech model, once, when the model
+- **No network, except one model download and checks you ask for.** Ivy sends nothing anywhere: no
+  telemetry, no analytics, no accounts, no automatic updates. **Check for updates** in Settings (since 0.2.7)
+  asks GitHub for the latest release only when you press it; **Download & install** fetches that release's
+  setup and checks it against the release's SHA256SUMS.txt before running it. Otherwise, its only connection
+  is downloading its speech model, once, when the model
   isn't installed yet (since 0.2.5; before that, setup downloaded it): HTTPS requests to this repository's
   release, which carry nothing but the file name, the byte range and Ivy's version number. The model must match SHA-256
   fingerprints built into Ivy, or it is deleted. To keep Ivy fully offline, put the model files next to the
@@ -72,7 +75,8 @@ responding, you may disclose after 90 days.
   was sent. Fixed in 0.1.5.) Ivy's window runs in Microsoft Edge WebView2, which is part of Windows.
   WebView2 itself can contact Microsoft for its own services, as set by your Windows settings. That
   traffic carries nothing from Ivy.
-- **Short-lived data.** Recordings and transcripts are deleted after 24 hours. **Clear all** in History
+- **Short-lived data.** Recordings and transcripts are deleted after 24 hours (or after up to 7 days, if you
+  choose that in History). **Clear all** in History
   deletes them at once. Lifetime stats (word counts, streaks) are stored separately as plain numbers,
   with no text or audio.
 - **Audio in memory is wiped.** Ivy's audio buffers, including the boosted and resampled copies, are
@@ -94,7 +98,8 @@ responding, you may disclose after 90 days.
 
 Being clear about limits is part of security:
 
-- **Other programs on your PC.** For up to 24 hours, recordings and transcripts are stored unencrypted
+- **Other programs on your PC.** For up to 24 hours (or the up to 7 days you chose in History), recordings
+  and transcripts are stored unencrypted
   in `%LOCALAPPDATA%\app.ivy.dictation`, readable by anything running as your Windows user. Clear History
   if that matters to you. (Local, not Roaming, AppData: a roaming profile never copies them to a server.)
 - **Clipboard readers.** Ivy pastes through the clipboard for a moment. A program that reads the

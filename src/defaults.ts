@@ -19,6 +19,7 @@ export const INITIAL_SETTINGS: SettingsConfig = {
     Professional: ['OUTLOOK.EXE', 'olk.exe', 'slack.exe', 'ms-teams.exe', 'WINWORD.EXE'],
   },
   snippets: [],
+  historyDays: 1,
   personalDictionary: [],
   selectedMic: '',
   availableMics: [],

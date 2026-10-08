@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { ChevronDown, Check, Cpu, Zap, Activity, RefreshCw } from 'lucide-react';
 import { SettingsConfig, HardwareMode, HardwareStatus } from '../types';
 import { ModeMatrix, modeCombo } from './ModeMatrix';
@@ -13,6 +14,59 @@ interface SettingsViewProps {
 const ACCENT_RGB = '255, 107, 0';
 // Two choices only (Yash, 2026-10-06). Ctrl + Shift is watched by modifier_hotkey.rs.
 const DICTATION_KEYS = ['Alt + Space', 'Ctrl + Shift'];
+
+type UpdateState =
+  | { s: 'idle' }
+  | { s: 'checking' }
+  | { s: 'current'; current: string }
+  | { s: 'available'; latest: string }
+  | { s: 'downloading'; pct: number }
+  | { s: 'error'; msg: string };
+
+/** Ivy goes online here only when the button is pressed (update.rs). */
+const UpdatesControl: React.FC = () => {
+  const [st, setSt] = useState<UpdateState>({ s: 'idle' });
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    listen<number>('ivy://update-progress', (e) => setSt({ s: 'downloading', pct: e.payload }))
+      .then((f) => (off = f))
+      .catch(() => {});
+    return () => off?.();
+  }, []);
+  const check = () => {
+    setSt({ s: 'checking' });
+    invoke<{ current: string; latest: string; newer: boolean }>('check_for_update')
+      .then((r) => setSt(r.newer ? { s: 'available', latest: r.latest } : { s: 'current', current: r.current }))
+      .catch((e) => setSt({ s: 'error', msg: `Couldn't check (${e}). Try again later.` }));
+  };
+  const install = () => {
+    setSt({ s: 'downloading', pct: 0 });
+    invoke('install_update').catch((e) => setSt({ s: 'error', msg: `Update stopped: ${e}.` }));
+  };
+  const btn = 'px-3.5 py-1.5 rounded-xl text-[12px] font-medium transition-all';
+  return (
+    <div className="flex items-center gap-3">
+      {st.s === 'current' && <span className="text-[12px] text-emerald-400">Up to date (v{st.current})</span>}
+      {st.s === 'error' && <span className="text-[12px] text-amber-300 max-w-[220px]">{st.msg}</span>}
+      {st.s === 'downloading' && <span className="text-[12px] text-white/70">Downloading {st.pct}%… Ivy restarts by itself.</span>}
+      {st.s === 'available' ? (
+        <button onClick={install} className={`${btn} text-white`} style={{ backgroundColor: `rgb(${ACCENT_RGB})` }}>
+          Download & install v{st.latest}
+        </button>
+      ) : (
+        st.s !== 'downloading' && (
+          <button
+            onClick={check}
+            disabled={st.s === 'checking'}
+            className={`${btn} text-white/80 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] hover:text-white disabled:opacity-50`}
+          >
+            {st.s === 'checking' ? 'Checking…' : 'Check for updates'}
+          </button>
+        )
+      )}
+    </div>
+  );
+};
 
 const Row: React.FC<{
   title: string;
@@ -530,6 +584,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }`}
               />
             </button>
+          </Row>
+
+          <Row
+            title="Updates"
+            description={`You're on Ivy v${__IVY_VERSION__}. Ivy checks GitHub for a newer version only when you press the button, and never sends anything about you.`}
+          >
+            <UpdatesControl />
           </Row>
 
           {/* Replay Onboarding Guide */}

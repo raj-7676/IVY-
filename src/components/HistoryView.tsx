@@ -17,7 +17,12 @@ interface HistoryViewProps {
   sessions: DictationSession[];
   onDeleteSession: (id: string) => void;
   onUpdateSession?: (session: DictationSession) => void;
+  /** How long history is kept (1-7 days) and how to change it. */
+  historyDays: number;
+  onHistoryDays: (days: number) => void;
 }
+
+const KEEP_OPTIONS = [1, 2, 3, 5, 7];
 
 interface RetryResult {
   success: boolean;
@@ -28,7 +33,7 @@ interface RetryResult {
 
 const ACCENT_RGB = '255, 107, 0';
 
-export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSession, onUpdateSession }) => {
+export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSession, onUpdateSession, historyDays, onHistoryDays }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -197,8 +202,27 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
           <div>
             <h1 className="text-[22px] font-semibold tracking-tight text-white/95">History</h1>
             <p className="text-[12.5px] text-white/40 mt-1">
-              Every dictation, kept on this machine only. Both the transcript and the recording are deleted automatically after 24 hours — nothing is kept longer than that.
+              Every dictation, kept on this machine only. Both the transcript and the recording are deleted
+              automatically after {historyDays === 1 ? '24 hours' : `${historyDays} days`} — nothing is kept longer than that.
             </p>
+            <div className="mt-3 flex items-center gap-2 text-[12px] text-white/55">
+              <span>Keep for</span>
+              <div className="flex rounded-lg border border-white/10 overflow-hidden">
+                {KEEP_OPTIONS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => onHistoryDays(d)}
+                    className={`px-2.5 py-1 text-[12px] font-semibold transition-colors duration-150 ${
+                      historyDays === d ? 'text-white' : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'
+                    }`}
+                    style={historyDays === d ? { backgroundColor: `rgb(${ACCENT_RGB})` } : undefined}
+                  >
+                    {d === 1 ? '24 h' : `${d} days`}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           {sessions.length > 0 && (
             <button

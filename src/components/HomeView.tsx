@@ -13,7 +13,7 @@ interface HomeViewProps {
 const ACCENT_RGB = '255, 107, 0';
 
 // A real "haven't loaded real stats yet" state, not a guess — `sessions` is
-// pruned to the last 24h by the backend's retention purge, so deriving
+// pruned to the last 1-7 days (History's "Keep for") by the backend's retention purge, so deriving
 // totals/streak from it whenever `userStats` hasn't arrived (including
 // forever, if that fetch ever fails) can never reproduce a real long-time
 // user's actual lifetime numbers. Zero and honest beats plausible and wrong.
@@ -113,48 +113,19 @@ export const HomeView: React.FC<HomeViewProps> = ({ sessions, userStats, hotkey,
           </div>
         </section>
 
-        {/* Onboarding Wizard Interactive Test Card */}
-        <section
-          className="rounded-3xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all"
-          style={{
-            backgroundColor: 'rgba(18, 13, 26, 0.85)',
-            border: '1px solid rgba(255, 107, 0, 0.28)',
-            boxShadow: '0 8px 30px rgba(0,0,0,0.5), 0 0 24px rgba(255,107,0,0.1)',
-          }}
+        {/* Setup guide: one slim line (Yash, 2026-10-08: shorter, not gone) */}
+        <button
+          id="btn-test-wizard-home"
+          onClick={() => onSelectScreen('first-run')}
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-2xl text-left transition-colors duration-150 hover:bg-white/[0.04]"
+          style={{ border: '1px solid rgba(255, 107, 0, 0.22)', backgroundColor: 'rgba(18, 13, 26, 0.6)' }}
         >
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#FF6B00]/15 border border-[#FF6B00]/30 flex items-center justify-center text-[#FFA133] shrink-0 mt-0.5">
-              <Sparkles className="w-5 h-5 text-[#FF6B00]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-[14px] font-semibold text-white">Setup guide</h3>
-                <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-[#FF6B00]/20 border border-[#FF6B00]/40 text-[#FFA133]">
-                  Interactive Wizard
-                </span>
-              </div>
-              <p className="text-[12px] text-white/50 mt-1 max-w-lg leading-relaxed">
-                Walk through setup again: pick your dictation key, GPU or CPU, Touch Up, a voice test with <kbd className="font-mono text-white/75 bg-white/[0.08] px-1 rounded text-[11px]">{hotkey}</kbd>, self-correction demo, and privacy.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-            <button
-              id="btn-test-wizard-home"
-              onClick={() => onSelectScreen('first-run')}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all cursor-pointer hover:brightness-110 flex items-center gap-2"
-              style={{
-                background: 'linear-gradient(to right, #FF6B00, #E05300)',
-                boxShadow: '0 0 16px rgba(255, 107, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3)',
-                border: '1px solid rgba(255, 161, 51, 0.4)',
-              }}
-            >
-              <span>Open setup guide</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </section>
+          <Sparkles className="w-4 h-4 text-[#FF6B00] shrink-0" />
+          <span className="text-[12.5px] text-white/75">
+            <span className="font-semibold text-white/90">Setup guide</span> · your key, GPU or CPU, mic test and privacy
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-white/40 ml-auto shrink-0" />
+        </button>
 
         {/* Recent */}
         <section className="space-y-3">

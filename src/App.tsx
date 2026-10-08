@@ -13,10 +13,10 @@ import { PauseControl } from './components/PauseControl';
 import { GlassParticles } from './components/GlassParticles';
 import { IvyLaunchIntro } from './components/IvyLaunchIntro';
 import { IvyLogo } from './components/IvyLogo';
-import { ModelDownloadBanner, ModelDownloadScreen, needsDownload, useModelStatus } from './components/ModelDownload';
+import { IntroFilm, ModelDownloadBanner, ModelDownloadScreen, needsDownload, useModelStatus } from './components/ModelDownload';
 import { INITIAL_DICTATIONS, INITIAL_SETTINGS } from './defaults';
 import { ScreenState, DictationSession, SettingsConfig, UserStats } from './types';
-import { Minus, Square, X } from 'lucide-react';
+import { Film, Minus, Square, X } from 'lucide-react';
 
 const ACCENT_RGB = '255, 107, 0';
 
@@ -78,6 +78,10 @@ export default function App() {
   // The intro film on the download screen holds it open after the download, until the film ends or the user
   // continues, so the wizard never cuts it off mid-sentence.
   const [introFilmPlaying, setIntroFilmPlaying] = useState(false);
+  // Title-bar "Intro": replays the film for anyone who never saw it (offline installs, people who updated).
+  const [replayFilm, setReplayFilm] = useState(false);
+  const noop = useCallback(() => undefined, []);
+  const closeFilm = useCallback(() => setReplayFilm(false), []);
   const waitingForModel = currentScreen === 'first-run' && (needsDownload(model) || introFilmPlaying);
   const [sessions, setSessions] = useState<DictationSession[]>(INITIAL_DICTATIONS);
   const [userStats, setUserStats] = useState<UserStats | undefined>(undefined);
@@ -252,6 +256,15 @@ export default function App() {
         </button>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setReplayFilm(true)}
+            title="Watch Ivy's intro film"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white/60 hover:text-white bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] transition-colors"
+          >
+            <Film className="w-3 h-3" />
+            Intro
+          </button>
           <PauseControl />
           <div className="hidden md:flex items-center gap-1.5 text-[11px] text-white/45">
             <span>Hold</span>
@@ -326,6 +339,8 @@ export default function App() {
           {currentScreen === 'history' && (
             <HistoryView
               sessions={sessions}
+              historyDays={settings.historyDays}
+              onHistoryDays={(historyDays) => handleUpdateSettings({ historyDays })}
               onDeleteSession={handleDeleteSession}
               onUpdateSession={handleUpdateSession}
             />
@@ -343,6 +358,7 @@ export default function App() {
               onReplayOnboarding={() => setCurrentScreen('first-run')}
             />
           )}
+          {replayFilm && <IntroFilm skippable onPlaying={noop} onDone={closeFilm} />}
           {waitingForModel && <ModelDownloadScreen status={model} launchDone={intro === 'off'} onIntroPlaying={setIntroFilmPlaying} />}
           {currentScreen === 'first-run' && !waitingForModel && (
             <FirstRunView

@@ -41,7 +41,7 @@ no second AI rewriting your text afterwards, so it stays fast and keeps your wor
 
 **Truly offline.** Ivy goes online only once: on first start it downloads its speech model from this
 repository's release (skip even that by [installing offline](#option-2-download-the-setup-file)). After that
-it never phones home, not even for updates.
+it never goes online again unless you press **Check for updates** in Settings.
 
 **Built for real voices.** The model was trained on many hours of real people speaking (noisy rooms,
 cheap microphones, many accents) with human-written transcripts, plus thousands of dictation
@@ -72,7 +72,7 @@ paragraphs full of corrections.
 ## Privacy
 
 - **No internet, ever.** Speech recognition and cleanup run entirely on your PC.
-- **Automatic clean-up:** recordings and transcripts are deleted after 24 hours. **Clear all** in History deletes them immediately.
+- **Automatic clean-up:** recordings and transcripts are deleted after 24 hours, or after up to 7 days if you choose that in History. **Clear all** in History deletes them immediately.
 - **Not saved in your clipboard history:** Ivy's pastes are kept out of Windows' clipboard history (Win + V) and clipboard cloud sync.
 - **Memory wiped:** audio in memory is overwritten with zeros once your dictation is done.
 - **Your stats stay, your words don't:** streaks and word counts are stored as plain numbers, separate from your transcripts.

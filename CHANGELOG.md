@@ -2,6 +2,13 @@
 
 All notable changes to Ivy. Downloads are on the [Releases page](https://github.com/raj-7676/IVY-/releases).
 
+## 0.2.7 (2026-10-08)
+
+- **Keep your history longer if you want.** History has a new **Keep for** choice: 24 hours (still the default), 2, 3, 5 or 7 days. It covers both transcripts and recordings. Choosing a shorter time deletes anything older straight away; **Clear all** still deletes everything at once. Thanks to a friend's idea for people who reuse what they dictated.
+- **Check for updates** in Settings. Ivy asks GitHub for the latest version only when you press it; if there's a newer one, **Download & install** fetches it, checks its fingerprint, installs it (keeping your data, model and settings) and reopens Ivy. Nothing checks by itself in the background.
+- The Setup guide on Home is now one slim line instead of a big card.
+- **Intro** button in the title bar, next to Pause: watch Ivy's intro film any time (people who installed offline or updated never saw it). Press Close or Esc to stop it.
+
 ## 0.2.6 (2026-10-08)
 
 - **New license: free to use, not for sale.** Ivy is now under the MIT License with the Commons Clause condition, and Ivy's fine-tuned speech model under Apache 2.0 with the same condition. Anyone may use Ivy for free, including at work, change it and share it; nobody may sell it or a paid product built mainly on it. The source code stays public. Earlier releases were withdrawn, and the model now downloads from this release.
