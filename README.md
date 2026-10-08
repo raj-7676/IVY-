@@ -10,6 +10,8 @@ cloud. Your voice never leaves your PC.
 
 **[Download Ivy for Windows](https://github.com/raj-7676/IVY-/releases/latest)**
 
+![Ivy turning "um, send it Tuesday, no wait, Thursday at 3" into "Send it Thursday at 3 PM."](docs/ivy-teaser.webp)
+
 ![Ivy's main window](docs/ivy-main.png)
 
 While you talk, a small bar shows the time, the tone in use and the app you're typing into:
