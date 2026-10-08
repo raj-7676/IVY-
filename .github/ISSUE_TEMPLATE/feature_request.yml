@@ -1,0 +1,27 @@
+name: 💡 Feature Request
+description: Propose an idea, improvement, or workflow enhancement for IVY Transcriber.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: Problem or Feature Idea
+      description: Describe the feature you would like to see and the problem it solves.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution or UX Flow
+      description: How should this feature work in IVY?
+    validations:
+      required: false
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Architectural Invariant Agreement
+      description: IVY is strictly offline with zero telemetry.
+      options:
+        - label: I understand that IVY is 100% offline and will never integrate cloud APIs, web telemetry, or remote user tracking.
+          required: true

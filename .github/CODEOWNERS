@@ -1,0 +1,27 @@
+# Code Owners for IVY Transcriber
+# Critical security, IPC, and CI paths require explicit maintainer review
+
+# Default owner for everything
+* @raj-7676
+
+# Security Policies and CI Workflows
+/.github/workflows/ @raj-7676
+/.github/dependabot.yml @raj-7676
+/SECURITY.md @raj-7676
+
+# Tauri Native Security, Capabilities & Native Rust Pipeline
+/src-tauri/capabilities/ @raj-7676
+/src-tauri/tauri.conf.json @raj-7676
+/src-tauri/src/lib.rs @raj-7676
+/src-tauri/src/audio.rs @raj-7676
+/src-tauri/src/lite.rs @raj-7676
+/src-tauri/Cargo.toml @raj-7676
+/src-tauri/Cargo.lock @raj-7676
+/src-tauri/installer/ @raj-7676
+/src-tauri/vendor/ @raj-7676
+/index.html @raj-7676
+
+# Frontend Build & Package Dependencies
+/package.json @raj-7676
+/package-lock.json @raj-7676
+/vite.config.ts @raj-7676

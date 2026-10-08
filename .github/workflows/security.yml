@@ -1,0 +1,97 @@
+name: Security Audit & Supply Chain Scan
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # Run weekly security scan on Sundays at midnight UTC
+    - cron: '0 0 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: Frontend Dependency Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Run NPM Security Audit
+        run: |
+          npm audit --audit-level=high
+
+  cargo-audit:
+    name: Rust Crates Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run Cargo Audit
+        working-directory: src-tauri
+        run: |
+          cargo audit
+
+  code-lint-and-check:
+    name: Security Compilation & Warnings Verification
+    # windows-latest moved to Visual Studio 2026 (MSVC 14.51) in June 2026; with it the vendored
+    # llama.cpp build fails (LNK1181: ggml.c.obj never written). Ivy is built and released with
+    # VS 2022, which the windows-2022 image keeps (maintained until ~2029).
+    runs-on: windows-2022
+    env:
+      # llama.cpp's nested CMake object paths pass Windows' 260-character limit under the
+      # default checkout path; a short target dir keeps them under it (README, "Building").
+      CARGO_TARGET_DIR: C:\t
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # tauri-build resolves `frontendDist` (../dist) at compile time and
+      # fails the build if it does not exist, so the web assets must be
+      # built before any cargo command runs.
+      - name: Build Frontend
+        run: |
+          npm ci
+          npm run build
+
+      # llama.cpp is built with its Vulkan backend; its build script needs VULKAN_SDK (and glslc).
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1
+        with:
+          vulkan_version: latest
+          cache: true
+
+      # .cargo/config.toml builds llama.cpp with Ninja, which needs the MSVC
+      # compiler environment (cl.exe/link.exe on PATH) like a local dev shell.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+
+      - name: Run Cargo Check
+        working-directory: src-tauri
+        run: |
+          cargo check --verbose

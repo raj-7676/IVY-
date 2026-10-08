@@ -1,0 +1,30 @@
+Ivy speech model license (ivy-lite-Q8_0.gguf and mmproj-ivy-lite-f16.gguf)
+
+The Ivy speech model is a fine-tuned version of Qwen3-ASR-1.7B by the Qwen team, Alibaba Cloud,
+which is licensed under the Apache License, Version 2.0 (full text: Apache-2.0.txt, shipped with it).
+
+Ivy's changes: the model was fine-tuned with LoRA on real human speech (with human-made transcripts)
+and scripted self-correction paragraphs, merged into the weights and converted to GGUF for llama.cpp.
+As section 4 of the Apache License allows, Ivy's fine-tuned model as a whole is provided under the
+Apache License 2.0 with the following additional condition:
+
+"Commons Clause" License Condition v1.0
+
+The Software is provided to you by the Licensor under the License, as defined below, subject to the
+following condition.
+
+Without limiting other conditions in the License, the grant of rights under the License will not include,
+and the License does not grant to you, the right to Sell the Software.
+
+For purposes of the foregoing, "Sell" means practicing any or all of the rights granted to you under the
+License to provide to third parties, for a fee or other consideration (including without limitation fees for
+hosting or consulting/support services related to the Software), a product or service whose value derives,
+entirely or substantially, from the functionality of the Software. Any license notice or attribution required
+by the License must also include this Commons Clause License Condition notice.
+
+Software: the Ivy speech model (fine-tune of Qwen3-ASR-1.7B)
+License: Apache License 2.0
+Licensor: Yashvanraj
+
+This condition covers Ivy's fine-tune only. The original Qwen3-ASR-1.7B model stays under the plain
+Apache License 2.0 from its authors.

@@ -1,0 +1,21 @@
+# Gitleaks Configuration for IVY Transcriber
+# Prevents accidental commits of API keys, private certificates, tokens, or credentials
+
+title = "IVY Transcriber Gitleaks Config"
+
+[extend]
+# Inherit base rules from standard Gitleaks library
+useDefault = true
+
+[allowlist]
+description = "Lockfiles (package checksums) and synthesized test audio only; docs are scanned too"
+paths = [
+  '''^src-tauri/tests/fixtures/''',
+  '''package-lock\.json$''',
+  '''Cargo\.lock$'''
+]
+regexes = [
+  '''example\.com''',
+  '''localhost''',
+  '''127\.0\.0\.1'''
+]
