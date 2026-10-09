@@ -5,16 +5,18 @@
 //! held cancels the dictation instead of finishing it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub const SPEC: &str = "Ctrl + Shift";
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static STARTED: AtomicBool = AtomicBool::new(false);
 const TICK: Duration = Duration::from_millis(15);
-/// Both keys must be held this long with no other key before a recording starts, so a Ctrl+Shift+X
-/// shortcut never flashes the capsule. A release within it is still a tap (double-tap = hands-free).
-const SETTLE: Duration = Duration::from_millis(150);
+/// Both keys must be held this many ticks (150 ms) with no other key before a recording starts, so a
+/// Ctrl+Shift+X shortcut never flashes the capsule. A release within it is still a tap (double-tap = hands-free).
+/// Counted in ticks, not clock time, so a late wake-up (a busy machine, a Mac's timer coalescing) can't cut the
+/// wait short before the other key has been seen.
+const SETTLE_TICKS: u32 = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Key {
@@ -85,9 +87,8 @@ fn watch(on_key: &dyn Fn(Key), read: &dyn Fn() -> Keys, enabled: &dyn Fn() -> bo
             continue;
         }
         // Both down: settle, then record until either is let go.
-        let started = Instant::now();
         let mut released = false;
-        while started.elapsed() < SETTLE {
+        for _ in 0..SETTLE_TICKS {
             std::thread::sleep(TICK);
             let k = read();
             if k.other {

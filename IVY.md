@@ -34,6 +34,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **Big round amounts** are written with the scale word ("18 lakhs", "2 million"), book 4 N8.
 - **Installer:** the release is a folder: setup exe + `ivy-lite-Q8_0.gguf` + `mmproj-ivy-lite-f16.gguf`; `hooks.nsh` copies the model in (§17).
 - **Test suite:** `cargo test --lib -- --test-threads=1` (see the verification table).
+- **macOS port** (2026-10-10, branch `macos-port`, worktree `D:\Dev\CODE\IVY_Transcriber-mac`): built and tested on GitHub's Apple Silicon runners, waiting for its first test on a real Mac (a friend's). What's done and the Mac traps: §19 and §5. `main` stays the Windows release.
 
 ---
 
@@ -100,6 +101,14 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **llama.cpp vs PyTorch on long audio:** 100-word greedy outputs never match PyTorch word for word (short clips match 60/60), and the 103 paragraph traps swing about ±4. Checked 2026-10-06: not quantisation (F16/BF16 give the same) and not windowing (mtmd's qwen3a already splits audio into 8 s windows like `n_window_infer`). Judge the GGUF on its own scores.
 - **Never give the model the pause-squeezed audio** from `prepare_audio`: squeezing pauses dropped the end of long dictations (Task 6 Bug B). Stage A is only the speech/no-speech gate now.
 - **The vendored `llama-cpp-sys-2` keeps the `IVY PATCH`** (no Voxtral audio avg-pooling, `tools/mtmd/clip-model.h`). Voxtral is gone, so it no longer matters, but keep it when bumping the crate unless the vendor is replaced.
+
+**macOS** (src/macos.rs; details in §19)
+- **A click on the capsule makes Ivy the active app.** A Tauri window can't be a non-activating panel, so Retry and Touch Up bring the target app back first (`macos::bring_to_front`), and the X gives the front back (`cancel_dictation`). The plain hotkey path never clicks, so it never loses the target.
+- **Never ask Ivy's own process for an accessibility attribute from the main thread:** Ivy would have to answer on that same blocked thread. `window_title` and `focused_role` skip Ivy's own pid.
+- **`NSWorkspace.frontmostApplication` only updates between main-loop turns.** The hotkey handler and sync commands run on the main thread, so `frontmost_pid` asks the accessibility system instead whenever Ivy has the permission (pasting needs it anyway).
+- **Without Accessibility, macOS drops a posted Cmd+V silently.** Ivy checks `AXIsProcessTrusted` before every paste and says so on the capsule instead of claiming "Pasted".
+- **Ivy is ad-hoc signed (no $99 Apple account, Yash 2026-10-10), so each update is a new app to macOS's permission system.** Accessibility shows as on but doesn't work until the user switches Ivy off and on in System Settings; the main window's banner and Settings say so.
+- **AppKit calls on windows must run on the main thread** (`run_on_main_thread` in `bridge_capsule_show`).
 
 **Rendering, platform and build**
 - **Outset `box-shadow` on a transparent DirectComposition surface renders as a hard rectangle** (Skia premultiplication). Use a solid fill, an inset highlight and a 1px border instead.
@@ -241,9 +250,21 @@ Measured on Yash's RTX 4060 laptop GPU and Intel Core i7 (§23):
   - `src/components/*` — views, wizard, capsule UI, `ModeMatrix.tsx`.
   - `scripts/download-models.mjs` (`npm run setup-models`) and `scripts/package-installer.mjs`.
 
-## 19. Cross-platform roadmap (not built)
+## 19. Cross-platform
 
-- **macOS:** Accessibility API (`AXUIElementSetValue`) injection. Any clipboard fallback must be tagged `org.nspasteboard.TransientType`.
+**macOS** (branch `macos-port`, built 2026-10-10; Apple Silicon, macOS 13+). Everything Mac-only lives in `src/macos.rs`, called from `#[cfg(target_os = "macos")]` branches in `lib.rs` next to their Windows twins; the frontend asks `src/utils/platform.ts` (`IS_MAC`, `keyLabel`).
+- **One chip** (Yash, 2026-10-10): the model always runs on the chip's GPU through llama.cpp's Metal backend (`should_use_gpu`). No GPU/CPU choice, battery rule or GPU sharing on a Mac; Settings shows "Runs on your Mac's chip" with the chip's name, and wizard step 3 is "Allow Ivy" (permissions) instead of "GPU or CPU".
+- **Foreground app** = a process id (`frontmost_pid`); the app's name for the capsule/history, its focused window title (Accessibility) for tone matching, its bundle file name ("Slack.app") for Tone app lists. The Tone screen picks apps from the running ones (`list_running_apps`).
+- **Paste:** Cmd+V as four Core Graphics events carrying only Command (`press_cmd`), after Option etc. are let go. Clipboard marked concealed (arboard `SetExtApple`). Finder pastes only into a text field (`has_text_focus`, accessibility role); other apps count as text boxes. Fixed QWERTY key codes (a plain Dvorak layout would send another letter).
+- **Hotkeys:** Option + Space and Option + V through Carbon hotkeys (no permission needed, press and release both arrive); Control + Shift through a 15 ms poll of the keyboard state (`ctrl_shift_state`).
+- **Permissions:** Microphone (`NSMicrophoneUsageDescription` in `Info.plist`, audio-input entitlement for the hardened runtime) and Accessibility (`AXIsProcessTrustedWithOptions` prompt + System Settings). Shown live in wizard step 3, Settings and a main-window banner (`get_permissions`, `request_permission`).
+- **Capsule:** `focusable(false)`, `accept_first_mouse`, status window level, on every Space and over full-screen apps, shown with `orderFrontRegardless` (never key, never activates Ivy), placed in the work area below the menu bar and notch.
+- **Window:** transparent (`macos-private-api`), rounded by the page, HUD glass material for "Background blur", traffic-light buttons on the left, Dock click reopens it (`RunEvent::Reopen`). Tauri's default menu gives Cmd+C/V/Q/W.
+- **Model files** download to `~/Library/Application Support/app.ivy.dictation/models` (the app bundle is read-only and signed).
+- **Updates:** the release's `Ivy_<version>_aarch64.dmg` (checked against SHA256SUMS.txt) is opened and Ivy quits; a release without a Mac disk image isn't offered as an update.
+- **Build:** `.github/workflows/macos.yml` on `macos-14` runs the unit tests, builds the DMG (ad-hoc signed), and checks the model on Metal against the Windows text (`model_matches_reference`). Local type-check for the Mac target is possible on Windows with stub crates for llama.cpp and objc2's exception helper (`cargo check --target aarch64-apple-darwin`).
+- **Not on a Mac (yet):** Intel Macs, notarization, full-screen sleep and GPU load rules, Caps Lock key.
+
 - **Linux X11:** `XGrabKey`, `_NET_ACTIVE_WINDOW`, `XTestFakeKeyEvent`, draining modifiers via `XQueryKeymap`.
 - **Linux Wayland:** needs the input-method protocol (`zwp_input_method_v2::commit_string`).
 - **Windows-only code to port:** DXGI telemetry, `SendInput`, power status, the Alt-menu mask.
@@ -254,7 +275,7 @@ Measured on Yash's RTX 4060 laptop GPU and Intel Core i7 (§23):
 - **Lab:** lite v2 sometimes writes a whole chatty paragraph in lowercase without punctuation (Yash round 2 p20). Cause: 44% of the YouTube-subtitle training keys have no punctuation. Round 5 (lab) retrains without them; swap the model files in if it passes.
 - **Personal Dictionary for accent mishears** (place names like Gachibowli): supported in the lite prompt (`Words that may appear: ...`).
 - **Mic start-up clips ~650ms of every dictation** on Yash's Realtek (§5), measured with `live_mic_capture`: `Recorder::start` takes 200–285ms to open the stream, then the driver sends zeros for a steady ~425ms. Remaining option is keeping the stream open while Ivy runs (mic-in-use indicator stays lit). Yash said 400ms is acceptable if it can't be reduced (2026-09-28).
-- **macOS** after Windows is finished (§19): Metal, Apple signing ($99/yr) + notarization, mic/Accessibility/Input Monitoring permissions.
+- **macOS** (§19): first real-Mac test pending (Yash's friend, Apple Silicon). Free ad-hoc signing for now (Yash, 2026-10-10): first launch needs "Open Anyway" in System Settings › Privacy & Security, and every update needs Accessibility switched off and on again.
 
 ## 21. Standing lessons
 
@@ -286,6 +307,7 @@ Measured on Yash's RTX 4060 laptop GPU and Intel Core i7 (§23):
 | 2026-10-03 | **66 passed, 0 failed, 2 ignored** | Rulebooks rewrite verified. Cold build (`npm run tauri build -- --no-bundle`), `npx tsc --noEmit` clean, deployed to both exe paths & relaunched. |
 | 2026-10-03 (Task 2) | **70 passed, 0 failed, 2 ignored** | Voxtral Mini 3B multimodal engine verified (60 golden clips: 98.3% match). Qwen removed. Benchmarks measured. Cold build, tsc clean, deployed to both exe paths. |
 | 2026-10-03 (fixes) | **70 passed, 0 failed, 1 ignored** | Patched llama.cpp avgpool bug (vendored `llama-cpp-sys-2`), exact training prompt, long-audio split, length-scaled timeout, single BOS, UTF-8 decode, real benchmark numbers. Golden 59/60 vs regenerated `expected`. Release build, tsc clean. |
+| 2026-10-10 (macOS port) | **70 passed, 0 failed, 2 ignored** on Windows; Mac target type-checks clean (lib + tests) | `model_matches_reference`: Vulkan and CPU both write the reference text for both fixture clips. Mac unit tests, DMG and Metal model check run on GitHub `macos-14`. tsc clean. |
 | 2026-10-06 (lite-only) | **61 passed, 0 failed, 1 ignored** (57 CPU + 4 lite GPU: golden 60/60, quiet mic 4/5, benchmark) | Antigravity Tasks 5-7 verified (lite golden 60/60, quiet mic 4/5). Voxtral, Whisper, Speed/Accuracy and Summarize removed; tone rulebooks, spell-check Touch Up, lakhs/crores rule, split-release installer. tsc clean. |
 
 ---

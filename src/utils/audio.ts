@@ -1,7 +1,12 @@
 // Plays the launch intro's sound: one file synthesized note-for-note on IvyLaunchIntro's beats
 // (V pieces land 0.43-0.98 s, I/Y pieces 1.60-1.97 s, landing 2.05 s, exit fade 2.65 s).
 // Made by scripts/intro-sound.py; change the animation's timing and that script must change with it.
-import INTRO_URL from '../assets/sounds/intro.ogg';
+import INTRO_OGG from '../assets/sounds/intro.ogg';
+// The same sound as AAC for a Mac: WebKit before Safari 18.4 can't decode Ogg Opus.
+import INTRO_M4A from '../assets/sounds/intro.m4a';
+import { IS_MAC } from './platform';
+
+const INTRO_URL = IS_MAC ? INTRO_M4A : INTRO_OGG;
 
 class SoundEngine {
   private ctx: AudioContext | null = null;

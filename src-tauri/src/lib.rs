@@ -111,6 +111,11 @@ static STARTING_DICTATION: AtomicBool = AtomicBool::new(false);
 // everywhere else (e.g. window closed to tray mid-wizard).
 static WIZARD_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+// Why the dictation shortcut doesn't work, when registering it at startup failed because another app holds it (on a
+// Mac, Raycast, Alfred and ChatGPT all default to Option + Space). The main window shows it until a shortcut is
+// saved that registers.
+static HOTKEY_PROBLEM: Mutex<Option<String>> = Mutex::new(None);
+
 // The real global shortcut registered for "paste Ivy's held-back text" (see
 // `MANUAL_PASTE_TEXT` below), kept as a parsed `Shortcut` so the handler can
 // match an incoming press with a cheap `==` instead of re-parsing settings.
@@ -1442,6 +1447,7 @@ fn save_settings(app: tauri::AppHandle, settings: SettingsConfig) -> Result<(), 
     let mut to_persist = old_settings.clone();
     if settings.hotkey != old_settings.hotkey {
         apply_hotkey_binding(&app, &old_settings.hotkey, &settings.hotkey, None)?;
+        *HOTKEY_PROBLEM.lock().unwrap_or_else(|e| e.into_inner()) = None;
         to_persist.hotkey = settings.hotkey.clone();
         write_settings_atomic(&app, &to_persist)?;
     }
@@ -1590,12 +1596,35 @@ const GPU_BACKEND: &str = if cfg!(target_os = "macos") { "GPU (Metal)" } else { 
 #[cfg(target_os = "macos")]
 const ACCESSIBILITY_NOTICE: &str = "Allow Ivy in System Settings › Accessibility to paste";
 
+/// macOS: set when the model gave garbage on the Mac's GPU in the once-per-run check (`metal_check`); Ivy then
+/// dictates on the chip's CPU cores until it restarts.
+#[cfg(target_os = "macos")]
+static METAL_BROKEN: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static METAL_CHECKED: AtomicBool = AtomicBool::new(false);
+
+/// macOS: proof that the model computes correctly on this Mac's GPU, from a known clip (tests/fixtures/sample.wav,
+/// "The quick brown fox jumps over the lazy dog."). GitHub's virtual Macs write "!!!!" there; a real Apple GPU
+/// writes the sentence.
+#[cfg(target_os = "macos")]
+fn metal_check(engine: &lite::LiteEngine) -> Result<(), String> {
+    const CLIP: &[u8] = include_bytes!("../tests/fixtures/sample.wav");
+    let mut reader = hound::WavReader::new(std::io::Cursor::new(CLIP)).map_err(|e| e.to_string())?;
+    let samples: Vec<f32> = reader.samples::<i16>().map(|s| s.unwrap_or(0) as f32 / i16::MAX as f32).collect();
+    let text = engine.transcribe(&samples, &[], std::time::Duration::from_secs(20))?;
+    let heard = text.to_lowercase();
+    if heard.contains("fox") && heard.contains("dog") { Ok(()) } else { Err(format!("heard {text:?}")) }
+}
+
+/// A Mac has one chip: the model runs on its GPU through Metal, unless that GPU failed `metal_check`. No CPU mode,
+/// battery rule or GPU sharing there (Settings and the setup wizard show neither).
+#[cfg(target_os = "macos")]
+fn should_use_gpu(_app: &tauri::AppHandle) -> bool {
+    !METAL_BROKEN.load(Ordering::SeqCst)
+}
+
+#[cfg(not(target_os = "macos"))]
 fn should_use_gpu(app: &tauri::AppHandle) -> bool {
-    // A Mac has one chip: the model always runs on its GPU through Metal. No CPU mode, battery rule or GPU
-    // sharing there (Settings and the setup wizard show neither).
-    if cfg!(target_os = "macos") {
-        return true;
-    }
     let settings = load_settings(app);
 
     // Real, unconditional override: a laptop running on battery (AC
@@ -3232,6 +3261,20 @@ fn prewarm(app: &tauri::AppHandle) {
         let t_warm = std::time::Instant::now();
         match lite::engine(&models, !prefer_gpu) {
             Ok(eng) => {
+                #[cfg(target_os = "macos")]
+                if !eng.is_cpu_mode && !METAL_CHECKED.swap(true, Ordering::SeqCst) {
+                    match metal_check(&eng) {
+                        Ok(()) => debug_log(&app, "Metal check passed: dictating on the Mac's GPU"),
+                        Err(why) => {
+                            METAL_BROKEN.store(true, Ordering::SeqCst);
+                            debug_log(&app, &format!("Metal check failed ({why}): dictating on the CPU until Ivy restarts"));
+                            drop(eng);
+                            lite::unload_engine();
+                            prewarm(&app);
+                            return;
+                        }
+                    }
+                }
                 let backend = if eng.is_cpu_mode { "CPU" } else { GPU_BACKEND };
                 let _ = eng.transcribe(&vec![0.0; 16_000], &[], std::time::Duration::from_secs(60));
                 debug_log(&app, &format!("lite engine pre-warmed via {backend} in {}ms (incl. a silent warm-up pass)", t_warm.elapsed().as_millis()));
@@ -3881,6 +3924,12 @@ async fn request_permission(kind: String) {
     let _ = kind;
 }
 
+/// Why the dictation shortcut isn't working (see `HOTKEY_PROBLEM`), or nothing.
+#[tauri::command]
+fn get_hotkey_problem() -> Option<String> {
+    HOTKEY_PROBLEM.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 /// macOS: the apps running now ("Notes.app"), for the Tone screen's "Add app". Windows picks an .exe instead.
 #[tauri::command]
 fn list_running_apps() -> Vec<String> {
@@ -3921,8 +3970,12 @@ fn get_hardware_status(app: tauri::AppHandle) -> HardwareStatusDto {
     let is_evicted = gpu_monitor::is_vram_evicted();
     let on_battery = gpu_monitor::is_on_battery();
 
-    let active_engine = if cfg!(target_os = "macos") {
-        "gpu".to_string()
+    #[cfg(target_os = "macos")]
+    let mac_engine = Some(if METAL_BROKEN.load(Ordering::SeqCst) { "cpu" } else { "gpu" });
+    #[cfg(not(target_os = "macos"))]
+    let mac_engine: Option<&str> = None;
+    let active_engine = if let Some(engine) = mac_engine {
+        engine.to_string()
     } else if on_battery {
         "cpu".to_string()
     } else if is_evicted {
@@ -4044,6 +4097,7 @@ pub fn run() {
             get_permissions,
             request_permission,
             list_running_apps,
+            get_hotkey_problem,
         ])
         .setup(move |app| {
             // Was debug-only — meant every `log::info!`/`log::warn!` call
@@ -4067,6 +4121,8 @@ pub fn run() {
             // hidden per tauri.conf.json's `visible: false`, reachable only
             // via the tray icon or the hotkey.
             migrate_roaming_data(&app.handle());
+            #[cfg(target_os = "macos")]
+            macos::disable_app_nap();
             let first_launch = !settings_path(&app.handle()).exists();
             // Real Windows Run-key launch, not a manual one — see the
             // `--autostart` arg registered with the plugin above.
@@ -4095,6 +4151,8 @@ pub fn run() {
                     .unwrap_or_else(|| Shortcut::new(Some(Modifiers::ALT), Code::Space));
                 if let Err(e) = app.global_shortcut().register(startup_hotkey) {
                     log::error!("Ivy: {} didn't register ({e}) — something else on this PC already has it.", startup_settings.hotkey);
+                    *HOTKEY_PROBLEM.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some(describe_register_failure(&startup_settings.hotkey, e));
                 }
             }
             // Same real registration as the dictation hotkey, for the manual-paste binding —

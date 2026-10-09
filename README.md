@@ -115,6 +115,13 @@ After installing, you can delete the downloaded files.
 **"Windows protected your PC"?** Ivy is new and not code-signed yet, so Windows SmartScreen may warn
 you. Click **More info**, then **Run anyway**. All the code is here, so anyone can check what it does.
 
+### macOS (preview)
+
+A first Mac build for Apple silicon (M1 or newer, macOS 13+) is being tested: `Ivy_<version>_aarch64.dmg`.
+Drag Ivy into Applications, allow it once in System Settings › Privacy & Security, and let it use the
+microphone and Accessibility (to type into other apps). It always runs on the Mac's chip, through Metal.
+Step by step, and what to try: [docs/MAC_TESTING.md](docs/MAC_TESTING.md).
+
 ### System requirements
 
 - Windows 10 or 11, 64-bit (tested on Windows 11). Setup takes care of the rest:
@@ -165,6 +172,11 @@ Always build through `npm run tauri dev` / `npx tauri build`. A bare `cargo buil
 pipeline, and the exe will look for the dev server instead of the bundled interface.
 
 Tests: `cargo test --lib -- --test-threads=1` inside `src-tauri`.
+
+**On a Mac:** Xcode's command line tools (`xcode-select --install`), Rust, Node.js, CMake and Ninja
+(`brew install cmake ninja`), then the same `npm install` and `npx tauri build --bundles app,dmg`. llama.cpp
+builds with Metal; no Vulkan SDK is needed. `.github/workflows/macos.yml` does exactly this on GitHub's
+Apple-silicon runners.
 
 More detail: [ARCHITECTURE.md](ARCHITECTURE.md) (how it fits together), [RULEBOOKS.md](RULEBOOKS.md)
 (the formatting and tone rules), [IVY.md](IVY.md) (full engineering notes).

@@ -413,7 +413,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {IS_MAC && (
             <Row
               title="Runs on your Mac's chip"
-              description="Ivy's model runs on the graphics built into your Mac's chip, through Metal. There's no CPU or GPU mode to choose, and nothing to set."
+              description={
+                hardwareStatus.gpuName !== 'Detecting...' && hardwareStatus.activeEngine === 'cpu'
+                  ? "Your Mac's graphics gave wrong results in Ivy's start-up check, so this time the model runs on the chip's processor cores instead (slower). Ivy checks again the next time it starts."
+                  : "Ivy's model runs on the graphics built into your Mac's chip, through Metal. There's no CPU or GPU mode to choose, and nothing to set."
+              }
             >
               <span className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12px] text-white/85" style={chipStyle}>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />

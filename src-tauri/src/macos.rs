@@ -373,6 +373,22 @@ pub fn running_apps() -> Vec<String> {
     names
 }
 
+/// Opts Ivy out of App Nap for as long as it runs. With no window on screen macOS would otherwise slow its timers,
+/// and the Control + Shift watcher (a 15 ms poll) would notice the keys late. The Mac can still sleep when idle.
+pub fn disable_app_nap() {
+    autoreleasepool(|_| unsafe {
+        let info: Option<Retained<AnyObject>> = msg_send![class!(NSProcessInfo), processInfo];
+        let reason: Option<Retained<AnyObject>> =
+            msg_send![class!(NSString), stringWithUTF8String: c"Ivy listens for its dictation key".as_ptr()];
+        if let (Some(info), Some(reason)) = (info, reason) {
+            // NSActivityUserInitiatedAllowingIdleSystemSleep
+            let token: Option<Retained<AnyObject>> =
+                msg_send![&*info, beginActivityWithOptions: 0x00EF_FFFFu64, reason: &*reason];
+            std::mem::forget(token); // the activity lasts as long as its token: all of Ivy's run
+        }
+    })
+}
+
 /// The Mac's chip ("Apple M2"), for Settings; "" if unknown.
 pub fn chip_name() -> String {
     let mut buf = [0u8; 128];

@@ -97,6 +97,14 @@ export default function App() {
   const [userStats, setUserStats] = useState<UserStats | undefined>(undefined);
   const [settings, setSettings] = useState<SettingsConfig>(INITIAL_SETTINGS);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  // The dictation shortcut didn't register at startup (another app holds it; lib.rs HOTKEY_PROBLEM).
+  const [hotkeyProblem, setHotkeyProblem] = useState<string | null>(null);
+  const readHotkeyProblem = useCallback(() => {
+    invoke<string | null>('get_hotkey_problem')
+      .then(setHotkeyProblem)
+      .catch(() => {});
+  }, []);
+  useEffect(readHotkeyProblem, [readHotkeyProblem]);
   const settingsLoaded = useRef(false);
   const settingsRef = useRef<SettingsConfig>(INITIAL_SETTINGS);
   // What the backend last accepted (the revert target if a save fails), and the pending save.
@@ -226,6 +234,7 @@ export default function App() {
       invoke('save_settings', { settings: toSave })
         .then(() => {
           savedSettingsRef.current = toSave;
+          readHotkeyProblem();
         })
         .catch((err) => {
           // A real failure here (most commonly: the new hotkey is already
@@ -371,6 +380,20 @@ export default function App() {
           >
             Open settings
           </button>
+        </div>
+      )}
+
+      {hotkeyProblem && (
+        <div className="relative z-10 mx-4 mt-2 shrink-0 flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl text-xs font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25">
+          <span>{hotkeyProblem}</span>
+          {currentScreen !== 'first-run' && (
+            <button
+              onClick={() => setCurrentScreen('settings')}
+              className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200"
+            >
+              Change shortcut
+            </button>
+          )}
         </div>
       )}
 
