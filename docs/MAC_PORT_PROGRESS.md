@@ -132,6 +132,11 @@ Commits on `macos-port` (newest first):
   - A crash during the check leaves a marker file, and that build stays on the CPU at the next start.
 - Nothing has run on a real Mac yet.
 
+**The build sent for testing:** commit a339900 (GitHub Actions run 38005737141), `Ivy_0.2.8_aarch64.dmg`, SHA-256
+`083d5eba41afc548754487803d30c8114d3f9c851dbfcfbacf27eaec485c5e30`. The zip `Ivy-0.2.8-mac.zip` holds it with
+`READ ME FIRST - Install and test.md` (= docs/MAC_TESTING.md), `SHA256SUMS-macos.txt` and this file as `PROGRESS.md`.
+Check a downloaded copy with `shasum -a 256 Ivy_0.2.8_aarch64.dmg`.
+
 ## 6. First things to check on the real Mac (in this order)
 
 1. **Does it open?** If not, run it from Terminal to see errors: `/Applications/Ivy.app/Contents/MacOS/app`. Crash
