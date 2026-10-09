@@ -29,6 +29,23 @@ tauri-plugin-autostart = "2"
 arboard = "3"
 enigo = "0.2"
 chrono = "0.4"
+
+# Microphone capture and resampling (src/audio.rs), and the lite speech model through llama.cpp's
+# mtmd audio support (src/lite.rs).
+cpal = "0.18"
+rubato = "0.16"
+llama-cpp-2 = { version = "0.1.156", features = ["mtmd"] }
+llama-cpp-sys-2 = { version = "0.1.156", features = ["mtmd"] }
+hound = "3"
+
+# Downloads the speech model on first start (src/model.rs): blocking HTTP over Windows' own TLS and
+# certificate store, and the SHA-256 check (sha2 is already in the build through Tauri).
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
+native-tls = "0.2"
+sha2 = "0.10"
+
+# GPU backend per platform: Vulkan on Windows, Metal on macOS (Apple Silicon).
+[target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
@@ -44,20 +61,12 @@ windows = { version = "0.58", features = [
 ] }
 # Same version tauri-plugin-autostart already uses; quotes Ivy's launch-at-startup entry (sync_autostart).
 winreg = "0.10"
+llama-cpp-2 = { version = "0.1.156", features = ["vulkan"] }
+llama-cpp-sys-2 = { version = "0.1.156", features = ["vulkan"] }
 
-# Microphone capture and resampling (src/audio.rs), and the lite speech model through llama.cpp's
-# mtmd audio support (src/lite.rs).
-cpal = "0.18"
-rubato = "0.16"
-llama-cpp-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
-llama-cpp-sys-2 = { version = "0.1.156", features = ["vulkan", "mtmd"] }
-hound = "3"
-
-# Downloads the speech model on first start (src/model.rs): blocking HTTP over Windows' own TLS and
-# certificate store, and the SHA-256 check (sha2 is already in the build through Tauri).
-ureq = { version = "2", default-features = false, features = ["native-tls"] }
-native-tls = "0.2"
-sha2 = "0.10"
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { version = "0.1.156", features = ["metal"] }
+llama-cpp-sys-2 = { version = "0.1.156", features = ["metal"] }
 
 # Vendored copy of llama-cpp-sys-2 0.1.156 with one fix: llama.cpp avg-pools Voxtral's audio encoder output
 # (187 tokens per 30 s) but the real model does not (375). See "IVY PATCH" in

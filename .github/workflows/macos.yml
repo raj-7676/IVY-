@@ -1,0 +1,51 @@
+name: macOS Build
+
+# Builds and tests Ivy on an Apple Silicon runner (macOS port, branch macos-port).
+on:
+  push:
+    branches: [ "macos-port" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build & test (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # .cargo/config.toml builds llama.cpp with Ninja.
+      - name: Install Ninja
+        run: brew install ninja
+
+      # tauri-build needs ../dist at compile time.
+      - name: Build Frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Cargo Tests
+        working-directory: src-tauri
+        run: cargo test --lib -- --test-threads=1
+
+      - name: Build App & DMG
+        run: npx tauri build --bundles app,dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Ivy-macOS-AppleSilicon
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 14

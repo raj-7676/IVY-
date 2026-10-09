@@ -11,7 +11,10 @@
 use std::collections::{HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(windows)]
 use std::os::windows::fs::FileExt;
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -276,7 +279,11 @@ fn fetch_piece(agent: &ureq::Agent, part: &Part, p: u64, done: &AtomicU64) -> Re
         };
         let mut chunk = &buf[..n];
         while !chunk.is_empty() {
-            match part.file.seek_write(chunk, pos) {
+            #[cfg(windows)]
+            let written = part.file.seek_write(chunk, pos);
+            #[cfg(unix)]
+            let written = part.file.write_at(chunk, pos);
+            match written {
                 Ok(w) => {
                     chunk = &chunk[w..];
                     pos += w as u64;
