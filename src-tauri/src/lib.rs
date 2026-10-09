@@ -4216,8 +4216,15 @@ pub fn run() {
                 // then was destroyed at the end of that same statement, so
                 // nothing was ever actually visible) instead of keeping it
                 // alive for the app's lifetime via managed state.
+                // macOS: the logo as a black silhouette that the menu bar tints for light and dark mode, like every
+                // menu bar icon there.
+                #[cfg(target_os = "macos")]
+                let tray_image = tauri::include_image!("icons/tray-mac.png");
+                #[cfg(not(target_os = "macos"))]
+                let tray_image = app.default_window_icon().cloned().ok_or("no default window icon")?;
                 let tray_icon = TrayIconBuilder::new()
-                    .icon(app.default_window_icon().cloned().ok_or("no default window icon")?)
+                    .icon(tray_image)
+                    .icon_as_template(cfg!(target_os = "macos"))
                     .menu(&tray_menu)
                     .show_menu_on_left_click(true)
                     .tooltip("Ivy — offline dictation")
