@@ -159,7 +159,7 @@ export default function CapsuleWindow() {
     clearTimeout(idleTimer.current);
     setMode('transcribing');
     try {
-      const res = await invoke<{ pasted: boolean }>('retry_transcription', { id: sessionId });
+      const res = await invoke<{ pasted: boolean }>('retry_transcription', { id: sessionId, fromCapsule: true });
       setPasted(res.pasted);
       setMode('pasted');
       idleTimer.current = window.setTimeout(goIdle, 1600);

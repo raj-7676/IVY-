@@ -255,9 +255,10 @@ pub fn activate(pid: i32) -> bool {
     })
 }
 
-/// Whether `pid` is in front, or back in front within `wait`. A click on the capsule makes Ivy the active app;
-/// the app the text is for is then brought back first. Another app in front means the user switched: no.
-pub fn bring_to_front(pid: i32, wait: Duration) -> bool {
+/// Whether `pid` is in front, or back in front within `wait`. `reclaim` is for a click on the capsule (Touch Up,
+/// Retry), which makes Ivy the active app: the app the text is for is then brought back first. Without it Ivy in
+/// front stays in front (History's Paste button, as on Windows). Another app in front means the user switched: no.
+pub fn bring_to_front(pid: i32, wait: Duration, reclaim: bool) -> bool {
     if pid <= 0 {
         return false;
     }
@@ -265,7 +266,7 @@ pub fn bring_to_front(pid: i32, wait: Duration) -> bool {
     if front == pid {
         return true;
     }
-    if front == own_pid() {
+    if reclaim && front == own_pid() {
         activate(pid);
     }
     let start = Instant::now();

@@ -1603,6 +1603,37 @@ static METAL_BROKEN: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static METAL_CHECKED: AtomicBool = AtomicBool::new(false);
 
+/// macOS: files for a crash during the GPU check. `metal-check.running` exists only while the check runs; found at
+/// the next start, Ivy died inside Metal, and `metal-disabled` (holding this build's id) keeps this build on the CPU
+/// instead of crashing again at every start. A newer build tries the GPU again.
+#[cfg(target_os = "macos")]
+fn metal_marker(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBuf> {
+    app.path().app_local_data_dir().ok().map(|dir| dir.join(name))
+}
+
+/// Which build this is: the version plus, for a build made on GitHub, its commit.
+#[cfg(target_os = "macos")]
+fn build_id() -> String {
+    format!("{}-{}", env!("CARGO_PKG_VERSION"), option_env!("GITHUB_SHA").unwrap_or("local"))
+}
+
+/// macOS, at start-up: a check that never finished means a crash inside Metal last time.
+#[cfg(target_os = "macos")]
+fn remember_metal_crash(app: &tauri::AppHandle) {
+    let (Some(running), Some(disabled)) = (metal_marker(app, "metal-check.running"), metal_marker(app, "metal-disabled")) else {
+        return;
+    };
+    if running.exists() {
+        let _ = fs::write(&disabled, build_id());
+        let _ = fs::remove_file(&running);
+    }
+    if fs::read_to_string(&disabled).is_ok_and(|id| id == build_id()) {
+        METAL_BROKEN.store(true, Ordering::SeqCst);
+        METAL_CHECKED.store(true, Ordering::SeqCst);
+        debug_log(app, "Ivy stopped during its last GPU check: this build dictates on the CPU");
+    }
+}
+
 /// macOS: proof that the model computes correctly on this Mac's GPU, from a known clip (tests/fixtures/sample.wav,
 /// "The quick brown fox jumps over the lazy dog."). GitHub's virtual Macs write "!!!!" there; a real Apple GPU
 /// writes the sentence.
@@ -2387,8 +2418,10 @@ struct RetryResult {
 /// (right after a failure) and History's retry action (any time after).
 /// Updates the existing entry in place on success, copies the result to clipboard,
 /// and pastes the result; leaves it untouched on a second failure.
+/// `from_capsule`: the capsule's own Retry button (not History's); on macOS that click made Ivy the active app, and
+/// the app the text is for comes back to the front before the paste.
 #[tauri::command]
-fn retry_transcription(app: tauri::AppHandle, id: String) -> Result<RetryResult, String> {
+fn retry_transcription(app: tauri::AppHandle, id: String, from_capsule: Option<bool>) -> Result<RetryResult, String> {
     if !is_valid_session_id(&id) {
         return Err("invalid session id format".into());
     }
@@ -2454,6 +2487,13 @@ fn retry_transcription(app: tauri::AppHandle, id: String) -> Result<RetryResult,
     }
     let _ = app.emit("ivy://history-updated", ());
 
+    #[cfg(target_os = "macos")]
+    if from_capsule == Some(true) {
+        let target = *LAST_EXTERNAL_HWND.lock().unwrap_or_else(|e| e.into_inner()) as i32;
+        macos::bring_to_front(target, std::time::Duration::from_millis(600), true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = from_capsule;
     // `paste_text` itself always ends up putting `text` on the clipboard,
     // in both its real-paste and clipboard-only-fallback paths — writing it
     // here first was redundant, and worse, clobbered the user's real
@@ -2560,7 +2600,7 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<bool, String
     let same_window = unsafe { GetForegroundWindow().0 as isize == target_hwnd };
     // The Touch Up click made Ivy the active app: the app the text went to is brought back to the front first.
     #[cfg(target_os = "macos")]
-    let same_window = macos::bring_to_front(target_hwnd as i32, std::time::Duration::from_millis(600));
+    let same_window = macos::bring_to_front(target_hwnd as i32, std::time::Duration::from_millis(600), true);
     #[cfg(not(any(windows, target_os = "macos")))]
     let same_window = false;
     if !same_window {
@@ -2929,11 +2969,11 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
             return false;
         }
     }
-    // macOS, same rules: the app from hotkey-down must be (back) in front — after a click on the capsule
-    // (Retry, Touch Up) Ivy itself is, and gives the front back — and have a text box. Without Accessibility
-    // permission macOS would silently drop the Cmd+V, so it isn't sent at all.
+    // macOS, same rules: the app from hotkey-down must still be in front (polled 300 ms, like above) and have a
+    // text box. Capsule clicks bring it back first (`touch_up_transcript`, `retry_transcription`). Without
+    // Accessibility permission macOS would silently drop the Cmd+V, so it isn't sent at all.
     #[cfg(target_os = "macos")]
-    if !macos::is_trusted() || !macos::bring_to_front(target as i32, std::time::Duration::from_millis(600)) || !has_text_focus(target) {
+    if !macos::is_trusted() || !macos::bring_to_front(target as i32, std::time::Duration::from_millis(300), false) || !has_text_focus(target) {
         *MANUAL_PASTE_TEXT.lock().unwrap_or_else(|e| e.into_inner()) = Some(text);
         return false;
     }
@@ -2959,9 +2999,13 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
         }
     }
     #[cfg(target_os = "macos")]
-    if macos::frontmost_pid() as isize != target {
-        previous_clipboard.restore();
-        return false;
+    {
+        // A quick dictation can finish while Option (from Option + Space) is still held.
+        release_held_modifiers();
+        if macos::frontmost_pid() as isize != target {
+            previous_clipboard.restore();
+            return false;
+        }
     }
     let ok = send_ctrl_key(0x56);
     if ok {
@@ -3258,12 +3302,25 @@ fn prewarm(app: &tauri::AppHandle) {
     std::thread::spawn(move || {
         let models = models_dir(&app);
         let prefer_gpu = should_use_gpu(&app);
+        // macOS: the first GPU load of this run is the check (`metal_check`), marked on disk until it's done.
+        #[cfg(target_os = "macos")]
+        let checking = prefer_gpu && !METAL_CHECKED.swap(true, Ordering::SeqCst);
+        #[cfg(target_os = "macos")]
+        let marker = metal_marker(&app, "metal-check.running").filter(|_| checking);
+        #[cfg(target_os = "macos")]
+        if let Some(m) = &marker {
+            let _ = fs::write(m, build_id());
+        }
         let t_warm = std::time::Instant::now();
         match lite::engine(&models, !prefer_gpu) {
             Ok(eng) => {
                 #[cfg(target_os = "macos")]
-                if !eng.is_cpu_mode && !METAL_CHECKED.swap(true, Ordering::SeqCst) {
-                    match metal_check(&eng) {
+                if checking {
+                    let result = metal_check(&eng);
+                    if let Some(m) = &marker {
+                        let _ = fs::remove_file(m);
+                    }
+                    match result {
                         Ok(()) => debug_log(&app, "Metal check passed: dictating on the Mac's GPU"),
                         Err(why) => {
                             METAL_BROKEN.store(true, Ordering::SeqCst);
@@ -3279,7 +3336,13 @@ fn prewarm(app: &tauri::AppHandle) {
                 let _ = eng.transcribe(&vec![0.0; 16_000], &[], std::time::Duration::from_secs(60));
                 debug_log(&app, &format!("lite engine pre-warmed via {backend} in {}ms (incl. a silent warm-up pass)", t_warm.elapsed().as_millis()));
             }
-            Err(e) => debug_log(&app, &format!("lite engine pre-warm failed: {e}")),
+            Err(e) => {
+                #[cfg(target_os = "macos")]
+                if let Some(m) = &marker {
+                    let _ = fs::remove_file(m);
+                }
+                debug_log(&app, &format!("lite engine pre-warm failed: {e}"));
+            }
         }
     });
 }
@@ -4122,7 +4185,10 @@ pub fn run() {
             // via the tray icon or the hotkey.
             migrate_roaming_data(&app.handle());
             #[cfg(target_os = "macos")]
-            macos::disable_app_nap();
+            {
+                macos::disable_app_nap();
+                remember_metal_crash(&app.handle());
+            }
             let first_launch = !settings_path(&app.handle()).exists();
             // Real Windows Run-key launch, not a manual one — see the
             // `--autostart` arg registered with the plugin above.
@@ -4357,8 +4423,15 @@ pub fn run() {
             // macOS: clicking Ivy in the Dock (or opening it again from Finder) while its window is closed brings
             // the window back, as every Mac app does.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = event {
-                show_main_window(app.clone());
+            match event {
+                tauri::RunEvent::Reopen { .. } => show_main_window(app.clone()),
+                // Quitting while the GPU check runs isn't a crash inside it (`remember_metal_crash`).
+                tauri::RunEvent::Exit => {
+                    if let Some(m) = metal_marker(app, "metal-check.running") {
+                        let _ = fs::remove_file(m);
+                    }
+                }
+                _ => {}
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
