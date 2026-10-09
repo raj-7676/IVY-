@@ -34,7 +34,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **Big round amounts** are written with the scale word ("18 lakhs", "2 million"), book 4 N8.
 - **Installer:** the release is a folder: setup exe + `ivy-lite-Q8_0.gguf` + `mmproj-ivy-lite-f16.gguf`; `hooks.nsh` copies the model in (§17).
 - **Test suite:** `cargo test --lib -- --test-threads=1` (see the verification table).
-- **macOS port** (2026-10-10, branch `macos-port`, worktree `D:\Dev\CODE\IVY_Transcriber-mac`): built and tested on GitHub's Apple Silicon runners, waiting for its first test on a real Mac (a friend's). What's done and the Mac traps: §19 and §5. `main` stays the Windows release.
+- **macOS port** (2026-10-10, branch `macos-port`, worktree `D:\Dev\CODE\IVY_Transcriber-mac`): built and tested on GitHub's Apple Silicon runners, waiting for its first test on a real Mac (a friend's). What's done and the Mac traps: §19 and §5; the full handoff for the next session (for example Claude on the test Mac) is `docs/MAC_PORT_PROGRESS.md`. `main` stays the Windows release.
 
 ---
 

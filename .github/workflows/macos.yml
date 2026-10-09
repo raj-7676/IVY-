@@ -5,6 +5,8 @@ name: macOS Build
 on:
   push:
     branches: [ "macos-port" ]
+    # Notes alone don't change the app.
+    paths-ignore: [ "**.md", "docs/**" ]
   workflow_dispatch:
 
 permissions:
