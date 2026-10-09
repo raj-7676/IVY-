@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { X } from 'lucide-react';
 import { soundEngine } from '../utils/audio';
 import { AtmosphericDust } from './AtmosphericDust';
+import { IS_MAC } from '../utils/platform';
 
 interface IvyLaunchIntroProps {
   onComplete?: () => void;
@@ -429,17 +430,20 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
           <span>Skip</span>
           <kbd className="text-[10px] px-1 py-0.5 rounded bg-white/10 text-white/70">Esc</kbd>
         </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            invoke('close_main').catch(() => {});
-          }}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-red-500/80 transition-colors duration-150 border border-white/10"
-          title="Close Ivy"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
+        {/* A Mac window has its own red close button at the top left. */}
+        {!IS_MAC && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              invoke('close_main').catch(() => {});
+            }}
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-red-500/80 transition-colors duration-150 border border-white/10"
+            title="Close Ivy"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
       {/* Viewport stage (shake completely removed) */}
       <div

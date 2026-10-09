@@ -16,7 +16,7 @@ import { IvyLogo } from './components/IvyLogo';
 import { IntroFilm, ModelDownloadBanner, ModelDownloadScreen, needsDownload, useModelStatus } from './components/ModelDownload';
 import { INITIAL_DICTATIONS, INITIAL_SETTINGS } from './defaults';
 import { ScreenState, DictationSession, SettingsConfig, UserStats } from './types';
-import { Film, Minus, Plus, Square, X } from 'lucide-react';
+import { Film, Minus, Square, X } from 'lucide-react';
 import { IS_MAC, keyLabel } from './utils/platform';
 import { requestPermission, usePermissions } from './components/MacPermissions';
 
@@ -179,14 +179,14 @@ export default function App() {
     };
   }, []);
 
-  // Real desktop blur comes from Windows (Acrylic), or on a Mac from its own dark glass material, rounded like the
-  // window and kept on while Ivy isn't the active app; CSS backdrop-filter can't see behind the window.
+  // Real desktop blur comes from Windows (Acrylic), or on a Mac from its own dark glass material, kept on while Ivy
+  // isn't the active app; CSS backdrop-filter can't see behind the window.
   const blurOn = settings.glassBlur > 0;
   useEffect(() => {
     try {
       const win = getCurrentWindow();
       const effects = IS_MAC
-        ? { effects: [Effect.HudWindow], state: EffectState.Active, radius: 12 }
+        ? { effects: [Effect.HudWindow], state: EffectState.Active }
         : { effects: [Effect.Acrylic] };
       (blurOn ? win.setEffects(effects) : win.clearEffects()).catch(() => {});
     } catch {
@@ -253,9 +253,8 @@ export default function App() {
       // No CSS border or rim shadows: Windows draws the window's own thin neutral border. The old orange
       // border and top highlight showed only on the top and left edges, which looked like a stray orange
       // line (Yash, 2026-10-07).
-      // macOS doesn't round a frameless window itself, so the page does (the window behind it is transparent).
       style={{ backgroundColor: `rgba(10, 8, 14, ${settings.glassOpacity / 100})` }}
-      className={`relative flex flex-col h-screen w-screen overflow-hidden antialiased select-none ${IS_MAC ? 'rounded-[12px]' : ''}`}
+      className="relative flex flex-col h-screen w-screen overflow-hidden antialiased select-none"
     >
       {/* Cinematic Launch Intro with smooth zoom-out-and-dock */}
       {intro === 'play' && (
@@ -280,43 +279,20 @@ export default function App() {
           replayed film: it sits under the header, whose buttons took the clicks meant for its Close. */}
       <header
         data-tauri-drag-region
-        className={`relative z-[100] h-11 flex items-center justify-between px-4 shrink-0 border-b border-white/[0.07] ${intro !== 'off' || replayFilm ? 'invisible' : ''}`}
+        // macOS draws its own red, yellow and green window buttons at the left of this bar (tauri.macos.conf.json:
+        // native title bar as an overlay), so the bar starts after them there.
+        className={`relative z-[100] h-11 flex items-center justify-between px-4 shrink-0 border-b border-white/[0.07] ${IS_MAC ? 'pl-[88px]' : ''} ${intro !== 'off' || replayFilm ? 'invisible' : ''}`}
       >
-        <div className="flex items-center gap-4">
-          {/* macOS: the window buttons sit on the left, red, yellow and green, as on every Mac window. */}
-          {IS_MAC && (
-            <div className="group/lights flex items-center gap-2">
-              {(
-                [
-                  ['Close', close, '#ff5f57', <X key="x" className="w-2 h-2 stroke-[3]" />],
-                  ['Minimize', minimize, '#febc2e', <Minus key="m" className="w-2 h-2 stroke-[3]" />],
-                  ['Zoom', toggleMaximize, '#28c840', <Plus key="p" className="w-2 h-2 stroke-[3]" />],
-                ] as const
-              ).map(([title, onClick, color, glyph]) => (
-                <button
-                  key={title}
-                  type="button"
-                  onClick={onClick}
-                  title={title}
-                  className="w-3 h-3 rounded-full flex items-center justify-center text-black/60 [&>svg]:opacity-0 group-hover/lights:[&>svg]:opacity-100"
-                  style={{ backgroundColor: color }}
-                >
-                  {glyph}
-                </button>
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setIntro('play')}
-            title="Replay intro"
-            className="flex items-center gap-2 cursor-pointer"
-          >
-            <IvyLogo size={18} glow={true} />
-            <span className="text-[13px] font-semibold tracking-tight text-white/90">Ivy</span>
-            <span className="text-[11px] font-medium text-white/35">v{__IVY_VERSION__}</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setIntro('play')}
+          title="Replay intro"
+          className="flex items-center gap-2 cursor-pointer"
+        >
+          <IvyLogo size={18} glow={true} />
+          <span className="text-[13px] font-semibold tracking-tight text-white/90">Ivy</span>
+          <span className="text-[11px] font-medium text-white/35">v{__IVY_VERSION__}</span>
+        </button>
 
         <div className="flex items-center gap-3">
           <button
