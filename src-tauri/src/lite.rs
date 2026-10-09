@@ -131,11 +131,6 @@ impl LiteEngine {
         mtmd_params.use_gpu = !is_cpu_mode;
         mtmd_params.print_timings = false;
         mtmd_params.n_threads = threads;
-        // macOS: plain attention, not flash attention (see `cparams` below).
-        #[cfg(target_os = "macos")]
-        {
-            mtmd_params.flash_attn_type = llama_cpp_sys_2::LLAMA_FLASH_ATTN_TYPE_DISABLED;
-        }
 
         let mtmd_ctx = unsafe {
             llama_cpp_sys_2::mtmd_init_from_file(mmproj_cstr.as_ptr(), raw_model, mtmd_params)
@@ -150,13 +145,6 @@ impl LiteEngine {
         cparams.n_ubatch = 512;
         cparams.n_threads = threads;
         cparams.n_threads_batch = threads;
-        // macOS: flash attention off. A GPU without Metal flash-attention kernels (GitHub's virtual Macs) gets it
-        // split onto the CPU by llama.cpp, and the text came out as "!!!!" there; plain attention is the path the
-        // CI's Metal check runs, and for a 1.7B model on short dictations it costs almost nothing.
-        #[cfg(target_os = "macos")]
-        {
-            cparams.flash_attn_type = llama_cpp_sys_2::LLAMA_FLASH_ATTN_TYPE_DISABLED;
-        }
 
         let lctx = unsafe { llama_cpp_sys_2::llama_new_context_with_model(raw_model, cparams) };
         if lctx.is_null() {
@@ -487,8 +475,10 @@ mod tests {
         let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures");
         let cases = [("sample.wav", REFERENCE_SAMPLE), ("real_speech_sample.wav", REFERENCE_REAL_SPEECH)];
         // Every CPU run must match. A Mac's GPU result is only reported unless IVY_REQUIRE_METAL is set: GitHub's
-        // virtual Macs have a paravirtual GPU that writes "!!!!" where the reference is expected (the app checks
-        // for that itself and falls back to the CPU, lib.rs `metal_check`).
+        // virtual Macs have a paravirtual GPU of the Apple5 family, without the simdgroup operations every real
+        // Apple-silicon GPU has (Apple7 and later), and llama.cpp's fallback kernels for it write "!!!!" (with or
+        // without flash attention, 2026-10-10). The app checks for that itself and falls back to the CPU, lib.rs
+        // `metal_check`.
         let require_gpu = cfg!(not(target_os = "macos")) || std::env::var_os("IVY_REQUIRE_METAL").is_some();
         for cpu in [false, true] {
             unload_engine();

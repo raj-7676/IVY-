@@ -1635,8 +1635,8 @@ fn remember_metal_crash(app: &tauri::AppHandle) {
 }
 
 /// macOS: proof that the model computes correctly on this Mac's GPU, from a known clip (tests/fixtures/sample.wav,
-/// "The quick brown fox jumps over the lazy dog."). GitHub's virtual Macs write "!!!!" there; a real Apple GPU
-/// writes the sentence.
+/// "The quick brown fox jumps over the lazy dog."). GitHub's virtual Macs (an Apple5-family virtual GPU, without
+/// the simdgroup operations of real Apple silicon) write "!!!!" there; the CPU writes the sentence.
 #[cfg(target_os = "macos")]
 fn metal_check(engine: &lite::LiteEngine) -> Result<(), String> {
     const CLIP: &[u8] = include_bytes!("../tests/fixtures/sample.wav");
