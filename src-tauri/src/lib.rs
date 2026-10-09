@@ -3902,6 +3902,10 @@ pub fn run() {
                             if PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
                                 handle_hotkey_up(app);
                             } else {
+                                // Asking to dictate ends a pause: it recorded while the title bar still said Paused.
+                                if is_paused() {
+                                    resume_ivy(app.clone());
+                                }
                                 handle_hotkey_down(app);
                             }
                         }

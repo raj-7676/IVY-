@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { ChevronDown, Check, Cpu, Zap, Activity, RefreshCw } from 'lucide-react';
 import { SettingsConfig, HardwareMode, HardwareStatus } from '../types';
 import { ModeMatrix, modeCombo } from './ModeMatrix';
+import { useEscape } from '../utils/useEscape';
 
 interface SettingsViewProps {
   settings: SettingsConfig;
@@ -128,6 +129,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [micsBlocked, setMicsBlocked] = useState(false);
   const [pendingModeSwitch, setPendingModeSwitch] = useState<HardwareMode | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
+  useEscape(micDropdownOpen, () => setMicDropdownOpen(false));
+  useEscape(!!pendingModeSwitch && !isRestarting, () => setPendingModeSwitch(null));
   const [hardwareStatus, setHardwareStatus] = useState<HardwareStatus>({
     activeEngine: 'cpu',
     configuredMode: settings.hardwareMode || 'gpu',
@@ -358,6 +361,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
 
                 {micDropdownOpen && (
+                <>
+                <div className="fixed inset-0 z-10" onClick={() => setMicDropdownOpen(false)} />
                 <div
                   className="absolute z-20 top-full right-0 mt-1.5 min-w-full rounded-2xl overflow-hidden py-1"
                   style={{
@@ -382,6 +387,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       </button>
                     ))}
                   </div>
+                </>
                 )}
               </div>
             )}

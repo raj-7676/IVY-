@@ -9,10 +9,15 @@ fn main() {
   // launch. Must be set before the webview is created.
   // The other switches stop WebView2's own background traffic to Microsoft (experiment configs,
   // component updates, connection telemetry): Ivy's window only ever shows local content.
+  // Switches already set by whoever launched Ivy are kept after these (the UI test run adds
+  // --remote-debugging-port this way).
+  let extra = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
   std::env::set_var(
     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    "--autoplay-policy=no-user-gesture-required --disable-background-networking \
-     --disable-component-update --disable-domain-reliability --disable-sync",
+    format!(
+      "--autoplay-policy=no-user-gesture-required --disable-background-networking \
+       --disable-component-update --disable-domain-reliability --disable-sync {extra}"
+    ),
   );
   app_lib::run();
 }

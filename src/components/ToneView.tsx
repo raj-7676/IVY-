@@ -94,6 +94,15 @@ export const ToneView: React.FC<ToneViewProps> = ({ settings, onUpdateSettings }
   const use = (tone: TonePreset) => {
     if (inUse !== tone) onUpdateSettings({ activeTonePreset: tone });
   };
+  // An app belongs to one mode only: adding it to a mode takes it out of the others (lib.rs would
+  // otherwise silently pick Casual first).
+  const setApps = (tone: TonePreset, apps: string[]) => {
+    const names = apps.map((a) => a.toLowerCase());
+    const next = Object.fromEntries(
+      Object.entries(settings.presetApps).map(([t, list]) => [t, list.filter((a) => !names.includes(a.toLowerCase()))]),
+    ) as typeof settings.presetApps;
+    onUpdateSettings({ presetApps: { ...next, [tone]: apps } });
+  };
 
   return (
     <div id="screen-tone" className="flex-1 flex flex-col h-full overflow-y-auto">
@@ -147,7 +156,7 @@ export const ToneView: React.FC<ToneViewProps> = ({ settings, onUpdateSettings }
               key={tone.id}
               tone={tone.id}
               apps={settings.presetApps[tone.id] || []}
-              onChange={(apps) => onUpdateSettings({ presetApps: { ...settings.presetApps, [tone.id]: apps } })}
+              onChange={(apps) => setApps(tone.id, apps)}
             />
           ))}
         </div>

@@ -16,7 +16,7 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ settings, onUpda
     e.preventDefault();
     const trimmed = newWord.trim();
     if (!trimmed) return;
-    if (!settings.personalDictionary.includes(trimmed)) {
+    if (!settings.personalDictionary.some((w) => w.toLowerCase() === trimmed.toLowerCase())) {
       onUpdateSettings({ personalDictionary: [...settings.personalDictionary, trimmed] });
     }
     setNewWord('');
@@ -59,6 +59,7 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ settings, onUpda
             type="text"
             value={newWord}
             onChange={(e) => setNewWord(e.target.value)}
+            maxLength={100}
             placeholder="Add a word or phrase"
             className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/[0.18] transition-colors duration-150"
           />

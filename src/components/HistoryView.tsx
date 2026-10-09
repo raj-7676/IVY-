@@ -12,6 +12,7 @@ import {
   Download,
 } from 'lucide-react';
 import { DictationSession } from '../types';
+import { useEscape } from '../utils/useEscape';
 
 interface HistoryViewProps {
   sessions: DictationSession[];
@@ -20,6 +21,7 @@ interface HistoryViewProps {
   /** How long history is kept (1-7 days) and how to change it. */
   historyDays: number;
   onHistoryDays: (days: number) => void;
+  hotkey: string;
 }
 
 const KEEP_OPTIONS = [1, 2, 3, 5, 7];
@@ -33,7 +35,7 @@ interface RetryResult {
 
 const ACCENT_RGB = '255, 107, 0';
 
-export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSession, onUpdateSession, historyDays, onHistoryDays }) => {
+export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSession, onUpdateSession, historyDays, onHistoryDays, hotkey }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -44,6 +46,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
   const [menuId, setMenuId] = useState<string | null>(null);
   const [isClearingAll, setIsClearingAll] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  useEscape(menuId !== null, () => setMenuId(null));
+  useEscape(showClearConfirm, () => setShowClearConfirm(false));
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
     if (!toast) return;
@@ -261,7 +265,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
                 <>
                   Hold{' '}
                   <kbd className="px-1.5 py-0.5 rounded bg-white/[0.07] text-white/70 text-[10.5px]">
-                    Alt+Space
+                    {hotkey}
                   </kbd>{' '}
                   anywhere and speak.
                 </>

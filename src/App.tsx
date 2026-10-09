@@ -42,13 +42,20 @@ export default function App() {
     }
     let done = false;
     let unlisten: (() => void) | undefined;
+    let timer: number | undefined;
     const start = () => {
       if (done) return;
       done = true;
       unlisten?.();
+      window.clearInterval(timer);
       setIntro('play');
     };
-    win.isVisible().then((v) => v && start()).catch(start);
+    // Polled too: opening Ivy while it already runs hidden (started with Windows) shows the window with
+    // set_focus but no focus event reaches the page, which left it on this black backdrop for good (a
+    // tester's PC, 2026-10-09).
+    const check = () => win.isVisible().then((v) => v && start()).catch(start);
+    check();
+    timer = window.setInterval(check, 500);
     // Tray, hotkey and second launch all show the window with set_focus.
     win
       .onFocusChanged(({ payload }) => payload && start())
@@ -57,6 +64,7 @@ export default function App() {
     return () => {
       done = true;
       unlisten?.();
+      window.clearInterval(timer);
     };
   }, [intro]);
 
@@ -239,10 +247,11 @@ export default function App() {
       <GlassParticles accentRgb={ACCENT_RGB} />
 
       {/* Titlebar Header - on top (z-[100]) so window controls stay reachable, except during the launch intro,
-          which has its own Skip and close buttons (two sets overlapped in the corner; Yash, 2026-10-08). */}
+          which has its own Skip and close buttons (two sets overlapped in the corner; Yash, 2026-10-08), and the
+          replayed film: it sits under the header, whose buttons took the clicks meant for its Close. */}
       <header
         data-tauri-drag-region
-        className={`relative z-[100] h-11 flex items-center justify-between px-4 shrink-0 border-b border-white/[0.07] ${intro !== 'off' ? 'invisible' : ''}`}
+        className={`relative z-[100] h-11 flex items-center justify-between px-4 shrink-0 border-b border-white/[0.07] ${intro !== 'off' || replayFilm ? 'invisible' : ''}`}
       >
         <button
           type="button"
@@ -340,6 +349,7 @@ export default function App() {
             <HistoryView
               sessions={sessions}
               historyDays={settings.historyDays}
+              hotkey={settings.hotkey}
               onHistoryDays={(historyDays) => handleUpdateSettings({ historyDays })}
               onDeleteSession={handleDeleteSession}
               onUpdateSession={handleUpdateSession}

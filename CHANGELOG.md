@@ -2,6 +2,16 @@
 
 All notable changes to Ivy. Downloads are on the [Releases page](https://github.com/raj-7676/IVY-/releases).
 
+## 0.2.8 (2026-10-09)
+
+- **Fixed: a black window when opening Ivy after a restart.** Ivy starts hidden with Windows; opening it from the Start menu or a shortcut then showed only a black screen, until you minimized and restored it. It now opens normally every time.
+- **Fixed: the Close button on the Intro film did nothing.** The title bar sat on top of it and took the click. Close and Esc both work now.
+- **Tray "Dictate Now" ends a pause.** It used to start recording while the title bar still said Paused.
+- Esc now closes the GPU/CPU dialog, the Clear-all dialog, the History "More options" menu and the microphone list; clicking outside the microphone list closes it too.
+- An app can be in only one Tone mode: adding it to a mode takes it out of the others (before, it could sit in two and Casual silently won).
+- Dictionary: words are limited to 100 characters as you type (a longer one used to show an error), and "ivy" isn't added again when "IVY" is already there.
+- The empty History page shows your real dictation key instead of always "Alt+Space".
+
 ## 0.2.7 (2026-10-08)
 
 - **Keep your history longer if you want.** History has a new **Keep for** choice: 24 hours (still the default), 2, 3, 5 or 7 days. It covers both transcripts and recordings. Choosing a shorter time deletes anything older straight away; **Clear all** still deletes everything at once. Thanks to a friend's idea for people who reuse what they dictated.
