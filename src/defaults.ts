@@ -1,4 +1,5 @@
 import { DictationSession, SettingsConfig } from './types';
+import { IS_MAC } from './utils/platform';
 
 // Ivy ships with no history. Everything on Home and in History is derived
 // from dictations the user actually made — there is deliberately no seeded
@@ -13,11 +14,18 @@ export const INITIAL_DICTATIONS: DictationSession[] = [];
 export const INITIAL_SETTINGS: SettingsConfig = {
   hotkey: 'Alt + Space',
   activeTonePreset: 'Standard',
-  presetApps: {
-    Casual: ['WhatsApp.exe', 'Discord.exe', 'Telegram.exe'],
-    Standard: ['Code.exe', 'Notion.exe', 'WindowsTerminal.exe'],
-    Professional: ['OUTLOOK.EXE', 'olk.exe', 'slack.exe', 'ms-teams.exe', 'WINWORD.EXE'],
-  },
+  // Same lists as the backend's defaults (lib.rs), shown only until the real settings load.
+  presetApps: IS_MAC
+    ? {
+        Casual: ['WhatsApp.app', 'Discord.app', 'Telegram.app', 'Messages.app'],
+        Standard: ['Visual Studio Code.app', 'Notion.app', 'Terminal.app'],
+        Professional: ['Microsoft Outlook.app', 'Mail.app', 'Slack.app', 'Microsoft Teams.app', 'Microsoft Word.app'],
+      }
+    : {
+        Casual: ['WhatsApp.exe', 'Discord.exe', 'Telegram.exe'],
+        Standard: ['Code.exe', 'Notion.exe', 'WindowsTerminal.exe'],
+        Professional: ['OUTLOOK.EXE', 'olk.exe', 'slack.exe', 'ms-teams.exe', 'WINWORD.EXE'],
+      },
   snippets: [],
   historyDays: 1,
   personalDictionary: [],

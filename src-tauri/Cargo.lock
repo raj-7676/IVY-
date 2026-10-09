@@ -99,6 +99,7 @@ dependencies = [
  "llama-cpp-sys-2",
  "log",
  "native-tls",
+ "objc2 0.6.4",
  "rubato",
  "serde",
  "serde_json",

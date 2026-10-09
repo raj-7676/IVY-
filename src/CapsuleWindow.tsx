@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { FloatingCapsule } from './components/FloatingCapsule';
 import { CapsuleMode, SettingsConfig, TonePreset } from './types';
 import { audioFeedback } from './services/audioFeedback';
+import { keyLabel } from './utils/platform';
 
 // The always-on-top, system-wide overlay window. Every state transition is
 // driven by real events from the Rust backend — the real Alt+Space global
@@ -18,7 +19,7 @@ export default function CapsuleWindow() {
   // Real value from Settings, only for display in the "no text field
   // found" message — fetched once since the capsule window has no other
   // reason to hold live settings, and the hotkey rarely changes mid-session.
-  const [manualPasteHotkey, setManualPasteHotkey] = useState<string>('Alt + V');
+  const [manualPasteHotkey, setManualPasteHotkey] = useState<string>(keyLabel('Alt + V'));
   const [touchUpStatus, setTouchUpStatus] = useState<'offer' | 'loading' | 'done' | 'clean' | 'error'>('offer');
   const idleTimer = useRef<number | undefined>(undefined);
   const [notice, setNotice] = useState('');
@@ -37,7 +38,7 @@ export default function CapsuleWindow() {
     const loadSettings = () => {
       invoke<SettingsConfig>('get_settings')
         .then((s) => {
-          setManualPasteHotkey(s.manualPasteHotkey);
+          setManualPasteHotkey(keyLabel(s.manualPasteHotkey));
         })
         .catch(() => {});
     };

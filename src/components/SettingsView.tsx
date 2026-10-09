@@ -5,6 +5,8 @@ import { ChevronDown, Check, Cpu, Zap, Activity, RefreshCw } from 'lucide-react'
 import { SettingsConfig, HardwareMode, HardwareStatus } from '../types';
 import { ModeMatrix, modeCombo } from './ModeMatrix';
 import { useEscape } from '../utils/useEscape';
+import { IS_MAC, keyLabel } from '../utils/platform';
+import { PermissionRows, usePermissions } from './MacPermissions';
 
 interface SettingsViewProps {
   settings: SettingsConfig;
@@ -49,7 +51,13 @@ const UpdatesControl: React.FC = () => {
     <div className="flex items-center gap-3">
       {st.s === 'current' && <span className="text-[12px] text-emerald-400">Up to date (v{st.current})</span>}
       {st.s === 'error' && <span className="text-[12px] text-amber-300 max-w-[220px]">{st.msg}</span>}
-      {st.s === 'downloading' && <span className="text-[12px] text-white/70">Downloading {st.pct}%… Ivy restarts by itself.</span>}
+      {st.s === 'downloading' && (
+        <span className="text-[12px] text-white/70">
+          {IS_MAC
+            ? `Downloading ${st.pct}%… Then drag Ivy into Applications in the window that opens.`
+            : `Downloading ${st.pct}%… Ivy restarts by itself.`}
+        </span>
+      )}
       {st.s === 'available' ? (
         <button onClick={install} className={`${btn} text-white`} style={{ backgroundColor: `rgb(${ACCENT_RGB})` }}>
           Download & install v{st.latest}
@@ -130,6 +138,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [pendingModeSwitch, setPendingModeSwitch] = useState<HardwareMode | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   useEscape(micDropdownOpen, () => setMicDropdownOpen(false));
+  const perms = usePermissions(IS_MAC);
   useEscape(!!pendingModeSwitch && !isRestarting, () => setPendingModeSwitch(null));
   const [hardwareStatus, setHardwareStatus] = useState<HardwareStatus>({
     activeEngine: 'cpu',
@@ -255,6 +264,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </header>
 
       <div className="px-8 pb-10 max-w-2xl w-full mx-auto">
+        {IS_MAC && (
+          <div className="mb-6">
+            <div className="text-[11px] uppercase tracking-wider text-white/30 mb-2.5">Permissions</div>
+            <PermissionRows perms={perms} />
+          </div>
+        )}
         <div className="pb-2">
           <div className="text-[11px] uppercase tracking-wider text-white/30 mb-1">Appearance</div>
         </div>
@@ -311,7 +326,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     }`}
                     style={picked ? { backgroundColor: `rgba(${ACCENT_RGB}, 0.25)`, border: `1px solid rgba(${ACCENT_RGB}, 0.5)` } : undefined}
                   >
-                    {key}
+                    {keyLabel(key)}
                   </button>
                 );
               })}
@@ -319,12 +334,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </Row>
           {(
             [
-              ['Alt + V', 'Paste held-back text', "No text box when you finished speaking? Ivy keeps your words in its own clipboard (your normal clipboard is never touched). Click where you want them and press Alt + V."],
+              ['Alt + V', 'Paste held-back text', `No text box when you finished speaking? Ivy keeps your words in its own clipboard (your normal clipboard is never touched). Click where you want them and press ${keyLabel('Alt + V')}.`],
             ] as const
           ).map(([keys, title, description]) => (
             <Row key={keys} title={title} description={description}>
               <div className="flex items-center gap-1.5">
-                {keys.split(' + ').map((part) => (
+                {keyLabel(keys).split(' + ').map((part) => (
                   <kbd key={part} className="px-2.5 py-1 rounded-lg text-[11px] text-white/85 font-medium" style={chipStyle}>
                     {part}
                   </kbd>
@@ -393,7 +408,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             )}
           </Row>
 
+          {/* A Mac has one chip and no GPU or CPU mode to pick: the model always runs on the chip's GPU (lib.rs
+              should_use_gpu). */}
+          {IS_MAC && (
+            <Row
+              title="Runs on your Mac's chip"
+              description="Ivy's model runs on the graphics built into your Mac's chip, through Metal. There's no CPU or GPU mode to choose, and nothing to set."
+            >
+              <span className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12px] text-white/85" style={chipStyle}>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                {hardwareStatus.gpuName === 'Detecting...' ? 'Apple silicon' : hardwareStatus.gpuName || 'Apple silicon'}
+              </span>
+            </Row>
+          )}
+
           {/* Compute Acceleration (GPU vs CPU) */}
+          {!IS_MAC && (
           <div className="py-5 border-t border-white/[0.06]">
             <div className="flex items-start justify-between gap-6 mb-3">
               <div className="min-w-0">
@@ -516,7 +546,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
+          )}
+
           {/* Smart VRAM Eviction */}
+          {!IS_MAC && (
           <Row
             title="Smart GPU sharing (games, videos & 3D)"
             description={`While a game or full-screen video player is in front, Ivy sleeps: model unloaded, Alt+Space left to the game. Full-screen browsers and terminals don't count. When other programs keep the GPU at ${settings.vramEvictionThreshold}% or more, Ivy switches to CPU (a short note shows on the overlay) and returns to the GPU when it calms down.`}
@@ -545,11 +578,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </button>
           </Row>
+          )}
 
           {/* VRAM eviction threshold — was persisted, validated (50-100) and
               read by the backend's GPU monitor already, with no way to
               actually change it from its 90% default anywhere in this UI. */}
-          {settings.smartVramEviction && (
+          {!IS_MAC && settings.smartVramEviction && (
             <SliderRow
               title="GPU usage limit"
               value={settings.vramEvictionThreshold}
@@ -565,7 +599,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {/* Launch at Startup */}
           <Row
             title="Launch at Startup"
-            description="Run Ivy in the background the moment you sign in to Windows — no window opens, only the tray icon and the hotkey are live. Open the app anytime from the tray."
+            description={
+              IS_MAC
+                ? 'Run Ivy in the background as soon as you log in to your Mac — no window opens, only the menu bar icon and the hotkey are live. Open the app anytime from the menu bar or the Dock.'
+                : 'Run Ivy in the background the moment you sign in to Windows — no window opens, only the tray icon and the hotkey are live. Open the app anytime from the tray.'
+            }
           >
             <button
               id="launch-at-startup-toggle"

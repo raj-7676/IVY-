@@ -304,7 +304,11 @@ fn sha256(file: &File, size: u64, mut progress: impl FnMut(u64)) -> Result<Strin
     let mut buf = vec![0u8; 1 << 20];
     let mut pos = 0u64;
     while pos < size {
-        let n = file.seek_read(&mut buf, pos).map_err(|e| format!("Couldn't read the download back: {e}"))?;
+        #[cfg(windows)]
+        let read = file.seek_read(&mut buf, pos);
+        #[cfg(unix)]
+        let read = file.read_at(&mut buf, pos);
+        let n = read.map_err(|e| format!("Couldn't read the download back: {e}"))?;
         if n == 0 {
             return Err("The download is shorter than it should be. Press Retry.".to_string());
         }

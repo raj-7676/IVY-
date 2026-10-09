@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Sparkles, ArrowRight } from 'lucide-react';
 import { DictationSession, ScreenState, UserStats } from '../types';
 import { computeStats, greeting } from '../stats';
+import { IS_MAC, keyLabel } from '../utils/platform';
 
 interface HomeViewProps {
   sessions: DictationSession[];
@@ -64,7 +65,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ sessions, userStats, hotkey,
           <p className="text-[12.5px] text-white/40 mt-1.5">
             Hold{' '}
             <kbd className="px-1.5 py-0.5 rounded-md bg-white/[0.07] border border-white/[0.1] text-white/80 text-[10.5px]">
-              {hotkey}
+              {keyLabel(hotkey)}
             </kbd>{' '}
             anywhere and talk. Ivy types it where your cursor is.
           </p>
@@ -122,7 +123,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ sessions, userStats, hotkey,
         >
           <Sparkles className="w-4 h-4 text-[#FF6B00] shrink-0" />
           <span className="text-[12.5px] text-white/75">
-            <span className="font-semibold text-white/90">Setup guide</span> · your key, GPU or CPU, mic test and privacy
+            <span className="font-semibold text-white/90">Setup guide</span> · your key, {IS_MAC ? 'permissions' : 'GPU or CPU'}, mic test and privacy
           </span>
           <ArrowRight className="w-3.5 h-3.5 text-white/40 ml-auto shrink-0" />
         </button>

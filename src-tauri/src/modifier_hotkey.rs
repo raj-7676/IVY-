@@ -1,6 +1,6 @@
 //! "Ctrl + Shift" as the dictation key (Yash, 2026-10-06: two choices only, Alt + Space or Ctrl + Shift).
-//! Windows can't register a modifier-only combo as a hotkey, so a small thread looks at the keyboard state
-//! every 15 ms. (A low-level keyboard hook was tried first and never fired on Yash's laptop.) Nothing is
+//! Windows (and macOS) can't register a modifier-only combo as a hotkey, so a small thread looks at the keyboard
+//! state every 15 ms. (A low-level keyboard hook was tried first and never fired on Yash's laptop.) Nothing is
 //! swallowed: Ctrl+Shift+T and other shortcuts still work, because any other key pressed while both are
 //! held cancels the dictation instead of finishing it.
 
@@ -54,7 +54,13 @@ fn read_keyboard() -> Keys {
         let other = (0x01..=0xFE).filter(|vk| !matches!(vk, 0x10 | 0x11 | 0xA0..=0xA3)).any(held);
         Keys { ctrl: held(0x11), shift: held(0x10), other }
     }
-    #[cfg(not(windows))]
+    // macOS: the same poll over the keyboard state (Control + Shift is free there too: Mac shortcuts use Command).
+    #[cfg(target_os = "macos")]
+    {
+        let (ctrl, shift, other) = crate::macos::ctrl_shift_state();
+        Keys { ctrl, shift, other }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     Keys::default()
 }
 

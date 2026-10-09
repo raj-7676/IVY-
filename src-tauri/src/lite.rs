@@ -384,6 +384,10 @@ mod tests {
         reader.samples::<i16>().map(|s| s.unwrap() as f32 / i16::MAX as f32).collect()
     }
 
+    // What the Windows build (Vulkan and CPU alike) writes for tests/fixtures/sample.wav and real_speech_sample.wav.
+    const REFERENCE_SAMPLE: &str = "The quick brown fox jumps over the lazy dog.";
+    const REFERENCE_REAL_SPEECH: &str = "Delete requirements.rs, we don't need it anymore.";
+
     #[derive(Deserialize)]
     struct GoldenItem {
         audio: String,
@@ -455,6 +459,38 @@ mod tests {
         println!("============================================================\n");
 
         assert!(matches >= 57, "Expected at least 57/60 matches, got {matches}/{total}");
+    }
+
+    /// The same speech gives the same text on every backend Ivy ships: Vulkan and CPU on Windows, Metal on a Mac
+    /// (IVY.md §19; a backend can hear differently, as llama.cpp's Voxtral pooling once did). The expected text
+    /// is the Windows build's output. Needs the model files:
+    /// `IVY_MODELS_DIR=<folder holding ivy-lite/> cargo test --lib model_matches_reference -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn model_matches_reference() {
+        let models_dir = std::env::var("IVY_MODELS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models"));
+        assert!(models_dir.join(LITE_DIR).join(MODEL_NAME).exists(), "no model under {}", models_dir.display());
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures");
+        let cases = [("sample.wav", REFERENCE_SAMPLE), ("real_speech_sample.wav", REFERENCE_REAL_SPEECH)];
+        // A Mac always runs on its GPU (lib.rs should_use_gpu), so only Windows checks CPU too.
+        let modes: &[bool] = if cfg!(target_os = "macos") { &[false] } else { &[false, true] };
+        for &cpu in modes {
+            unload_engine();
+            let t = Instant::now();
+            let eng = engine(&models_dir, cpu).expect("the model loads");
+            let backend = if cpu { "CPU" } else if cfg!(target_os = "macos") { "Metal" } else { "Vulkan" };
+            println!("{backend}: model loaded in {} ms", t.elapsed().as_millis());
+            for (file, expected) in cases {
+                let samples = read_wav(&fixtures.join(file));
+                let t = Instant::now();
+                let text = eng.transcribe(&samples, &[], Duration::from_secs(120)).expect("transcribes");
+                println!("{backend} {file}: {text:?} in {} ms", t.elapsed().as_millis());
+                assert_eq!(text.trim(), expected, "{backend} heard {file} differently");
+            }
+        }
+        unload_engine();
     }
 
     #[test]

@@ -3,6 +3,8 @@
 //! install" fetches that release's setup, checks it against the release's SHA256SUMS.txt, starts it in
 //! passive mode with /R (it removes the old version but keeps data, model and settings, then reopens Ivy:
 //! see installer/installer.nsi) and quits Ivy so the files can be replaced. Nothing ever runs by itself.
+//! On macOS the release's disk image takes the setup's place: checked the same way, opened, and Ivy quits so the
+//! new Ivy can be dragged over the old one in Applications.
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -68,7 +70,10 @@ fn latest_release() -> Result<Release, String> {
         .map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| "GitHub sent something unexpected".to_string())?;
     let version = v["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+    #[cfg(not(target_os = "macos"))]
     let setup_name = format!("Ivy_{version}_x64-setup.exe");
+    #[cfg(target_os = "macos")]
+    let setup_name = format!("Ivy_{version}_aarch64.dmg");
     let asset = |name: &str| {
         v["assets"].as_array().into_iter().flatten()
             .find(|a| a["name"].as_str() == Some(name))
@@ -88,7 +93,9 @@ fn latest_release() -> Result<Release, String> {
 #[tauri::command]
 pub fn check_for_update() -> Result<UpdateInfo, String> {
     let r = latest_release()?;
-    Ok(UpdateInfo { newer: is_newer(&r.version, CURRENT), current: CURRENT.into(), latest: r.version, page: r.page })
+    // A Windows-only release isn't an update for a Mac.
+    let newer = is_newer(&r.version, CURRENT) && (cfg!(not(target_os = "macos")) || !r.setup_url.is_empty());
+    Ok(UpdateInfo { newer, current: CURRENT.into(), latest: r.version, page: r.page })
 }
 
 /// Downloads the newer setup, checks it, starts it and quits Ivy. Progress: `ivy://update-progress` (0-100).
@@ -98,7 +105,11 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     let path = tauri::async_runtime::spawn_blocking(move || download_setup(&handle))
         .await
         .map_err(|e| e.to_string())??;
+    #[cfg(not(target_os = "macos"))]
     std::process::Command::new(&path).args(["/P", "/R"]).spawn().map_err(|e| format!("could not start setup: {e}"))?;
+    // Finder shows the disk image with Ivy and Applications side by side.
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(&path).spawn().map_err(|e| format!("could not open the disk image: {e}"))?;
     app.exit(0);
     Ok(())
 }

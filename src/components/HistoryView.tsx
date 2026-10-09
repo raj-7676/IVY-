@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { DictationSession } from '../types';
 import { useEscape } from '../utils/useEscape';
+import { keyLabel } from '../utils/platform';
 
 interface HistoryViewProps {
   sessions: DictationSession[];
@@ -265,7 +266,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
                 <>
                   Hold{' '}
                   <kbd className="px-1.5 py-0.5 rounded bg-white/[0.07] text-white/70 text-[10.5px]">
-                    {hotkey}
+                    {keyLabel(hotkey)}
                   </kbd>{' '}
                   anywhere and speak.
                 </>

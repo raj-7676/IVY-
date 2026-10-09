@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Plus, X } from 'lucide-react';
 import { SettingsConfig, TonePreset } from '../types';
+import { IS_MAC } from '../utils/platform';
+import { useEscape } from '../utils/useEscape';
 
 interface ToneViewProps {
   settings: SettingsConfig;
@@ -43,6 +46,64 @@ const InUse: React.FC = () => (
   </span>
 );
 
+/** "Slack.app" reads "Slack"; the list keeps the bundle's full name, which is what Ivy matches on (lib.rs). */
+const appLabel = (app: string) => app.replace(/\.app$/i, '');
+
+const addAppStyle =
+  'inline-flex items-center gap-1.5 cursor-pointer border border-dashed border-white/[0.16] hover:border-white/[0.3] rounded-full px-3.5 py-1.5 text-[12px] text-white/70 transition-colors duration-150';
+
+/** macOS: an app is picked from the ones running now; an .app bundle can't go through a file picker. */
+const RunningAppPicker: React.FC<{ apps: string[]; onPick: (app: string) => void }> = ({ apps, onPick }) => {
+  const [open, setOpen] = useState(false);
+  const [running, setRunning] = useState<string[] | null>(null);
+  useEscape(open, () => setOpen(false));
+  const show = () => {
+    setRunning(null);
+    setOpen(true);
+    invoke<string[]>('list_running_apps')
+      .then(setRunning)
+      .catch(() => setRunning([]));
+  };
+  const choices = (running ?? []).filter((r) => !apps.some((a) => a.toLowerCase() === r.toLowerCase()));
+  return (
+    <div className="relative">
+      <button type="button" onClick={show} className={addAppStyle} title="Pick from the apps open right now">
+        <Plus className="w-3.5 h-3.5" style={{ color: `rgb(${ACCENT_RGB})` }} />
+        Add app
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div
+            className="absolute z-20 top-full left-0 mt-1.5 min-w-[220px] max-h-64 overflow-y-auto rounded-2xl py-1"
+            style={{ backgroundColor: 'rgba(16, 13, 20, 0.97)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            {running === null ? (
+              <div className="px-3.5 py-2 text-[12px] text-white/50">Looking…</div>
+            ) : choices.length === 0 ? (
+              <div className="px-3.5 py-2 text-[12px] text-white/50 max-w-[260px]">No other apps are open. Open the app first.</div>
+            ) : (
+              choices.map((app) => (
+                <button
+                  key={app}
+                  type="button"
+                  onClick={() => {
+                    onPick(app);
+                    setOpen(false);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-[12px] text-white/80 hover:bg-white/[0.07] transition-colors duration-150 whitespace-nowrap"
+                >
+                  {appLabel(app)}
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const AppList: React.FC<{
   tone: TonePreset;
   apps: string[];
@@ -64,7 +125,7 @@ const AppList: React.FC<{
             className="inline-flex items-center gap-2 pl-3.5 pr-2 py-1.5 rounded-full text-[12px] text-white/85"
             style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' }}
           >
-            {app}
+            {appLabel(app)}
             <button
               onClick={() => onChange(apps.filter((a) => a !== app))}
               className="text-white/30 hover:text-red-400 transition-colors duration-150"
@@ -74,14 +135,15 @@ const AppList: React.FC<{
             </button>
           </span>
         ))}
-        <label
-          className="inline-flex items-center gap-1.5 cursor-pointer border border-dashed border-white/[0.16] hover:border-white/[0.3] rounded-full px-3.5 py-1.5 text-[12px] text-white/70 transition-colors duration-150"
-          title="Pick the app's .exe file"
-        >
-          <Plus className="w-3.5 h-3.5" style={{ color: `rgb(${ACCENT_RGB})` }} />
-          Add app
-          <input type="file" accept=".exe" onChange={pick} className="hidden" />
-        </label>
+        {IS_MAC ? (
+          <RunningAppPicker apps={apps} onPick={(app) => onChange([...apps, app])} />
+        ) : (
+          <label className={addAppStyle} title="Pick the app's .exe file">
+            <Plus className="w-3.5 h-3.5" style={{ color: `rgb(${ACCENT_RGB})` }} />
+            Add app
+            <input type="file" accept=".exe" onChange={pick} className="hidden" />
+          </label>
+        )}
       </div>
     </div>
   );
@@ -147,8 +209,9 @@ export const ToneView: React.FC<ToneViewProps> = ({ settings, onUpdateSettings }
           <div>
             <div className="text-[13px] font-medium text-white/85">Add your apps</div>
             <p className="text-[11.5px] text-white/30 mt-1">
-              Click "Add app" and pick the program's .exe (for example brave.exe, usually in
-              C:\Program Files). That program then always uses that mode.
+              {IS_MAC
+                ? 'Open the app, then click "Add app" and pick it from the apps open right now. That app then always uses that mode.'
+                : `Click "Add app" and pick the program's .exe (for example brave.exe, usually in C:\\Program Files). That program then always uses that mode.`}
             </p>
           </div>
           {TONES.map((tone) => (

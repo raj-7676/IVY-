@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
+import { keyLabel } from '../utils/platform';
 
 interface HotkeyBadgeProps {
   hotkey: string;
@@ -16,8 +17,8 @@ export const HotkeyBadge: React.FC<HotkeyBadgeProps> = React.memo(({
   onClick,
   id = 'hotkey-badge',
 }) => {
-  // Parse hotkey tokens, e.g. "Alt + Space" -> ["Alt", "Space"]
-  const keys = hotkey.split('+').map((k) => k.trim());
+  // Parse hotkey tokens, e.g. "Alt + Space" -> ["Alt", "Space"] ("⌥ Option", "Space" on a Mac)
+  const keys = keyLabel(hotkey).split('+').map((k) => k.trim());
 
   return (
     <motion.div

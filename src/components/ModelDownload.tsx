@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AlertTriangle, CheckCircle2, Download, RefreshCw, ShieldCheck, VolumeX, WifiOff, X } from 'lucide-react';
 import { IvyWordmark } from './IvyWordmark';
 import INTRO_VIDEO from '../assets/ivy-intro.mp4';
+import { IS_MAC, keyLabel } from '../utils/platform';
 
 // Ivy downloads its speech model itself on first start (src-tauri/src/model.rs); setup only copies it in for
 // an offline install. First start: a full screen (ModelDownloadScreen), then the setup wizard opens by itself
@@ -105,7 +106,7 @@ export const ModelDownloadBanner: React.FC<{ hotkey: string }> = ({ hotkey }) =>
       <Shell tone="ok">
         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
         <span className="text-white/90 font-semibold">Speech model ready.</span>
-        <span className="text-white/60">Hold {hotkey || 'Alt + Space'} anywhere and talk.</span>
+        <span className="text-white/60">Hold {keyLabel(hotkey || 'Alt + Space')} anywhere and talk.</span>
       </Shell>
     );
   }
@@ -391,7 +392,7 @@ export const ModelDownloadScreen: React.FC<{
         {!failed && !ready && (
           <p className="text-xs text-white/40 text-center max-w-md">
             Setup opens by itself when the download is done. You can close this window meanwhile: Ivy keeps
-            downloading from the tray and comes back when it is ready.
+            downloading from the {IS_MAC ? 'menu bar' : 'tray'} and comes back when it is ready.
           </p>
         )}
       </div>

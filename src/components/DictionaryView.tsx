@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { SettingsConfig } from '../types';
+import { MOD } from '../utils/platform';
 
 interface DictionaryViewProps {
   settings: SettingsConfig;
@@ -114,7 +115,7 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ settings, onUpda
               "Send it to my email address" becomes "Send it to you@example.com".
             </p>
             <p className="text-[12px] text-white/30 mt-1 leading-relaxed max-w-md">
-              Pick a phrase you'd never say by accident. Ctrl + Z undoes a paste if one slips through.
+              Pick a phrase you'd never say by accident. {MOD} + Z undoes a paste if one slips through.
             </p>
           </div>
           <form onSubmit={addSnippet} className="flex flex-col gap-2 max-w-md">

@@ -16,6 +16,8 @@ mod modifier_hotkey;
 mod spellcheck;
 mod update;
 pub mod lite;
+#[cfg(target_os = "macos")]
+mod macos;
 
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
@@ -355,12 +357,25 @@ fn apply_snippets(text: &str, snippets: &[Snippet]) -> String {
 
 impl Default for SettingsConfig {
     fn default() -> Self {
-        // Programs, picked by their .exe (Yash, 2026-10-06: names were confusing and often didn't match).
+        // Programs, picked by their .exe (Yash, 2026-10-06: names were confusing and often didn't match); on
+        // macOS by their .app bundle.
         let list = |apps: &[&str]| apps.iter().map(|a| a.to_string()).collect::<Vec<_>>();
         let mut preset_apps = HashMap::new();
-        preset_apps.insert("Casual".to_string(), list(&["WhatsApp.exe", "Discord.exe", "Telegram.exe"]));
-        preset_apps.insert("Standard".to_string(), list(&["Code.exe", "Notion.exe", "WindowsTerminal.exe"]));
-        preset_apps.insert("Professional".to_string(), list(&["OUTLOOK.EXE", "olk.exe", "slack.exe", "ms-teams.exe", "WINWORD.EXE"]));
+        #[cfg(not(target_os = "macos"))]
+        {
+            preset_apps.insert("Casual".to_string(), list(&["WhatsApp.exe", "Discord.exe", "Telegram.exe"]));
+            preset_apps.insert("Standard".to_string(), list(&["Code.exe", "Notion.exe", "WindowsTerminal.exe"]));
+            preset_apps.insert("Professional".to_string(), list(&["OUTLOOK.EXE", "olk.exe", "slack.exe", "ms-teams.exe", "WINWORD.EXE"]));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            preset_apps.insert("Casual".to_string(), list(&["WhatsApp.app", "Discord.app", "Telegram.app", "Messages.app"]));
+            preset_apps.insert("Standard".to_string(), list(&["Visual Studio Code.app", "Notion.app", "Terminal.app"]));
+            preset_apps.insert(
+                "Professional".to_string(),
+                list(&["Microsoft Outlook.app", "Mail.app", "Slack.app", "Microsoft Teams.app", "Microsoft Word.app"]),
+            );
+        }
         Self {
             hotkey: "Alt + Space".to_string(),
             active_tone_preset: "Standard".to_string(),
@@ -767,6 +782,12 @@ fn models_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
     if cfg!(debug_assertions) {
         return std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
     }
+    // On macOS the app is a signed, read-only bundle (and may run from the disk image), so the downloaded model
+    // lives with Ivy's data in ~/Library/Application Support/app.ivy.dictation/models.
+    #[cfg(target_os = "macos")]
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        return dir.join("models");
+    }
     app.path().resource_dir().unwrap_or_default().join("models")
 }
 
@@ -880,9 +901,11 @@ fn repoint_audio(path: &str, old_audio: &std::path::Path, new_audio: &std::path:
 #[cfg(test)]
 mod migrate_tests {
     use super::repoint_audio;
+    #[cfg(windows)]
     use std::path::Path;
 
     #[test]
+    #[cfg(windows)]
     fn moves_recordings_saved_in_roaming_and_leaves_others() {
         let old = Path::new(r"C:\Users\a\AppData\Roaming\app.ivy.dictation\audio");
         let new = Path::new(r"C:\Users\a\AppData\Local\app.ivy.dictation\audio");
@@ -892,6 +915,17 @@ mod migrate_tests {
         );
         assert_eq!(repoint_audio(r"C:\Users\a\AppData\Local\app.ivy.dictation\audio\s-2.wav", old, new), None);
         assert_eq!(repoint_audio("", old, new), None);
+    }
+
+    // The same with the platform's own separators (Roaming and Local are one folder on macOS, so the move never
+    // runs there, but the path logic must still hold).
+    #[test]
+    fn repoints_with_native_paths() {
+        let base = std::env::temp_dir();
+        let (old, new) = (base.join("Roaming").join("audio"), base.join("Local").join("audio"));
+        let moved = repoint_audio(old.join("s-1.wav").to_str().unwrap(), &old, &new);
+        assert_eq!(moved.as_deref(), new.join("s-1.wav").to_str());
+        assert_eq!(repoint_audio(new.join("s-2.wav").to_str().unwrap(), &old, &new), None);
     }
 }
 
@@ -943,6 +977,7 @@ fn foreground_app_label() -> String {
     app_name_from_exe(&foreground_exe_name())
 }
 
+#[cfg(any(windows, test))]
 fn app_name_from_exe(exe: &str) -> String {
     let name = exe.trim();
     let name = name.strip_suffix(".exe").or_else(|| name.strip_suffix(".EXE")).unwrap_or(name);
@@ -1049,25 +1084,76 @@ fn has_text_focus(hwnd: isize) -> bool {
     }
 }
 
-#[cfg(not(windows))]
+// macOS: the foreground "window" is the app in front, identified by its process id (src/macos.rs). Same two
+// labels as on Windows: the window title for tone matching only, the app's name for the capsule and history.
+#[cfg(target_os = "macos")]
+fn foreground_app_label() -> String {
+    let name = macos::app_name(macos::frontmost_pid());
+    if name.is_empty() { "Desktop".to_string() } else { name }
+}
+#[cfg(target_os = "macos")]
+fn foreground_tone_label() -> String {
+    let title = macos::window_title(macos::frontmost_pid());
+    if title.trim().is_empty() { foreground_app_label() } else { title }
+}
+/// The app in front as its bundle is named on disk, e.g. "Slack.app" ("" if unknown). Tone app lists match on this.
+#[cfg(target_os = "macos")]
+fn foreground_exe_name() -> String {
+    macos::app_bundle_name(macos::frontmost_pid())
+}
+#[cfg(target_os = "macos")]
+fn capture_foreground_hwnd() -> isize {
+    macos::frontmost_pid() as isize
+}
+
+// Finder (the desktop and its folder windows) has no text box except while renaming or searching, so it gets an
+// honest "couldn't paste" instead of a Cmd+V into nothing, like explorer.exe on Windows (`is_explorer_shell`). Any
+// other app counts as a text box, which is how every paste on Windows worked before UI Automation could tell.
+// ponytail: only Finder is asked; extend the role check to other apps if "Pasted to X" shows up where nothing was typed.
+#[cfg(target_os = "macos")]
+fn has_text_focus(pid: isize) -> bool {
+    let pid = pid as i32;
+    if macos::app_bundle_id(pid) != "com.apple.finder" {
+        return true;
+    }
+    matches!(macos::focused_role(pid).as_deref(), Some("AXTextField" | "AXTextArea" | "AXComboBox"))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn foreground_app_label() -> String {
     "Desktop".to_string()
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn foreground_tone_label() -> String {
     "Desktop".to_string()
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn foreground_exe_name() -> String {
     String::new()
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn capture_foreground_hwnd() -> isize {
     0
 }
 #[cfg(not(windows))]
 fn is_explorer_shell(_hwnd: isize) -> bool {
     false
+}
+
+/// Ivy's own windows as foreground ids (`capture_foreground_hwnd`): the capsule's and the main window's handles
+/// on Windows. On macOS the id is the app's process id, so both are Ivy's own.
+fn own_window_ids(app: &tauri::AppHandle) -> (isize, isize) {
+    #[cfg(windows)]
+    {
+        let hwnd = |label: &str| app.get_webview_window(label).and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize).unwrap_or(0);
+        (hwnd("capsule"), hwnd("main"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        let own = std::process::id() as isize;
+        (own, own)
+    }
 }
 
 fn code_for_letter(c: char) -> Option<Code> {
@@ -1105,9 +1191,18 @@ fn code_for_digit(c: char) -> Option<Code> {
 /// one or freeing it up in whatever app/OS feature is holding it.
 fn describe_register_failure(spec: &str, e: impl std::fmt::Display) -> String {
     let msg = e.to_string();
-    if msg.to_lowercase().contains("already registered") {
+    #[cfg(not(target_os = "macos"))]
+    let (taken, spec) = (msg.to_lowercase().contains("already registered"), spec.to_string());
+    // macOS's RegisterEventHotKey fails when another app holds the combination (Alfred and ChatGPT use Option + Space).
+    #[cfg(target_os = "macos")]
+    let (taken, spec) = (msg.contains("RegisterEventHotKey failed"), spec.replace("Alt", "Option").replace("Ctrl", "Control"));
+    if taken {
+        #[cfg(not(target_os = "macos"))]
+        let owner = "on this PC (another app or a Windows shortcut)";
+        #[cfg(target_os = "macos")]
+        let owner = "on this Mac (another app or a macOS shortcut)";
         format!(
-            "\"{spec}\" is already bound to something else on this PC (another app or a Windows shortcut). Pick a different key, or free this one up in that app's settings first."
+            "\"{spec}\" is already bound to something else {owner}. Pick a different key, or free this one up in that app's settings first."
         )
     } else {
         format!("Ivy couldn't register \"{spec}\" as a hotkey ({msg}). Try a different key.")
@@ -1206,14 +1301,15 @@ fn apply_hotkey_binding(
 
 /// The tone for a dictation (Yash, 2026-10-06): three modes. A program the user added to a mode's list
 /// always gets that mode; every other app gets the mode clicked on the Tone screen, at once. List entries
-/// ending in ".exe" match the foreground program exactly; older name entries match the window title.
+/// ending in ".exe" (Windows) or ".app" (macOS) match the foreground program exactly; older name entries match
+/// the window title.
 fn tone_for_label(settings: &SettingsConfig, title: &str, exe: &str) -> String {
     let title = title.to_lowercase();
     for tone in ["Casual", "Professional", "Standard"] {
         if let Some(apps) = settings.preset_apps.get(tone) {
             let hit = apps.iter().any(|a| {
                 let a = a.trim().to_lowercase();
-                if a.ends_with(".exe") { a.eq_ignore_ascii_case(exe) } else { !a.is_empty() && title.contains(&a) }
+                if a.ends_with(".exe") || a.ends_with(".app") { a.eq_ignore_ascii_case(exe) } else { !a.is_empty() && title.contains(&a) }
             });
             if hit {
                 return tone.to_string();
@@ -1487,7 +1583,19 @@ struct DictationComplete {
     text: String,
 }
 
+/// How the GPU is reached, for debug.log: llama.cpp's Vulkan backend on Windows, Metal on macOS.
+const GPU_BACKEND: &str = if cfg!(target_os = "macos") { "GPU (Metal)" } else { "GPU (Vulkan)" };
+
+/// Capsule note when macOS hasn't given Ivy the Accessibility permission that pasting needs.
+#[cfg(target_os = "macos")]
+const ACCESSIBILITY_NOTICE: &str = "Allow Ivy in System Settings › Accessibility to paste";
+
 fn should_use_gpu(app: &tauri::AppHandle) -> bool {
+    // A Mac has one chip: the model always runs on its GPU through Metal. No CPU mode, battery rule or GPU
+    // sharing there (Settings and the setup wizard show neither).
+    if cfg!(target_os = "macos") {
+        return true;
+    }
     let settings = load_settings(app);
 
     // Real, unconditional override: a laptop running on battery (AC
@@ -1550,7 +1658,7 @@ fn transcribe_and_clean(
             };
             match engine.transcribe(stt_samples, &dictionary, timeout) {
                 Ok(text) => {
-                    let backend = if engine.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                    let backend = if engine.is_cpu_mode { "CPU" } else { GPU_BACKEND };
                     debug_log(app, &format!("lite ok via {backend} in {}ms, {} chars", t_lite.elapsed().as_millis(), text.chars().count()));
                     text
                 }
@@ -2228,6 +2336,12 @@ fn run_dictation_pipeline(
         "ivy://dictation-complete",
         DictationComplete { success: true, reason: String::new(), active_app, session_id: id, pasted, text },
     );
+    // After the result, so the capsule ends on the reason rather than on "press Option + V" (which can't paste
+    // without the permission either).
+    #[cfg(target_os = "macos")]
+    if !pasted && !macos::is_trusted() {
+        let _ = app.emit("ivy://notice", ACCESSIBILITY_NOTICE);
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2409,9 +2523,16 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<bool, String
     let Some(target_hwnd) = target_hwnd else {
         return Err("nothing was pasted for this dictation, nothing to touch up".into());
     };
+    #[cfg(target_os = "macos")]
+    if !macos::is_trusted() {
+        return Err("Ivy needs Accessibility permission to swap the text (System Settings › Privacy & Security › Accessibility)".into());
+    }
     #[cfg(windows)]
     let same_window = unsafe { GetForegroundWindow().0 as isize == target_hwnd };
-    #[cfg(not(windows))]
+    // The Touch Up click made Ivy the active app: the app the text went to is brought back to the front first.
+    #[cfg(target_os = "macos")]
+    let same_window = macos::bring_to_front(target_hwnd as i32, std::time::Duration::from_millis(600));
+    #[cfg(not(any(windows, target_os = "macos")))]
     let same_window = false;
     if !same_window {
         return Err("switched to a different window since the paste — can't safely swap the text there".into());
@@ -2421,7 +2542,9 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<bool, String
     // "re-check right before sending keys" guards against for a fresh paste.
     #[cfg(windows)]
     let still_same_window = unsafe { GetForegroundWindow().0 as isize == target_hwnd };
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let still_same_window = macos::frontmost_pid() as isize == target_hwnd;
+    #[cfg(not(any(windows, target_os = "macos")))]
     let still_same_window = false;
     if !still_same_window {
         return Err("switched to a different window while touching up — can't safely swap the text there".into());
@@ -2517,6 +2640,7 @@ fn get_active_context(app: tauri::AppHandle) -> ActiveContext {
 
 /// Puts a transcript on the clipboard just long enough to paste it, marked so Windows keeps it out of
 /// clipboard history (Win+V), cloud clipboard sync and clipboard monitors: no copy outlives Ivy's history.
+/// On macOS it's marked concealed (nspasteboard.org), which clipboard managers such as Maccy and Raycast skip.
 fn set_clipboard_private(text: &str) -> Result<(), arboard::Error> {
     let mut clipboard = arboard::Clipboard::new()?;
     #[cfg(windows)]
@@ -2524,7 +2648,12 @@ fn set_clipboard_private(text: &str) -> Result<(), arboard::Error> {
         use arboard::SetExtWindows;
         clipboard.set().exclude_from_history().exclude_from_cloud().exclude_from_monitoring().text(text.to_string())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        use arboard::SetExtApple;
+        clipboard.set().exclude_from_history().text(text.to_string())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     clipboard.set_text(text.to_string())
 }
 
@@ -2623,7 +2752,13 @@ fn send_ctrl_key(vk: u16) -> bool {
     sent == inputs.len() as u32
 }
 
-#[cfg(not(windows))]
+/// macOS: Cmd, not Ctrl, is the paste and undo modifier.
+#[cfg(target_os = "macos")]
+fn send_ctrl_key(vk: u16) -> bool {
+    macos::press_cmd(if vk == 0x5A { macos::KEY_Z } else { macos::KEY_V })
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn send_ctrl_key(vk: u16) -> bool {
     let key = if vk == 0x5A { enigo::Key::Unicode('z') } else { enigo::Key::Unicode('v') };
     match enigo::Enigo::new(&enigo::Settings::default()) {
@@ -2681,7 +2816,14 @@ fn release_held_modifiers() {
     }
 }
 
-#[cfg(not(windows))]
+/// macOS: waits for the user to let go of Option and the other modifiers; the Cmd+V events themselves carry
+/// only Command (`macos::press_cmd`), so nothing needs a synthetic key-up.
+#[cfg(target_os = "macos")]
+fn release_held_modifiers() {
+    macos::wait_modifiers_released(std::time::Duration::from_millis(350));
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn release_held_modifiers() {}
 
 // RegisterHotKey swallows our hotkey's Space/V/B, so the focused app sees Alt
@@ -2758,6 +2900,14 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
             return false;
         }
     }
+    // macOS, same rules: the app from hotkey-down must be (back) in front — after a click on the capsule
+    // (Retry, Touch Up) Ivy itself is, and gives the front back — and have a text box. Without Accessibility
+    // permission macOS would silently drop the Cmd+V, so it isn't sent at all.
+    #[cfg(target_os = "macos")]
+    if !macos::is_trusted() || !macos::bring_to_front(target as i32, std::time::Duration::from_millis(600)) || !has_text_focus(target) {
+        *MANUAL_PASTE_TEXT.lock().unwrap_or_else(|e| e.into_inner()) = Some(text);
+        return false;
+    }
     // Read before overwriting — this is the one and only chance to know
     // what the clipboard held before Ivy clobbered it, needed to restore it
     // afterwards.
@@ -2778,6 +2928,11 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
             previous_clipboard.restore();
             return false;
         }
+    }
+    #[cfg(target_os = "macos")]
+    if macos::frontmost_pid() as isize != target {
+        previous_clipboard.restore();
+        return false;
     }
     let ok = send_ctrl_key(0x56);
     if ok {
@@ -2873,7 +3028,16 @@ fn make_window_non_activating(window: &tauri::WebviewWindow) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn make_window_non_activating(window: &tauri::WebviewWindow) {
+    match window.ns_window() {
+        // Called from `setup`, which runs on the main thread AppKit needs.
+        Ok(ns_window) => unsafe { macos::capsule_setup(ns_window) },
+        Err(e) => log::error!("Capsule: couldn't reach the window ({e})"),
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn make_window_non_activating(_window: &tauri::WebviewWindow) {}
 
 #[cfg(windows)]
@@ -2910,7 +3074,10 @@ fn get_cursor_monitor(app: &tauri::AppHandle) -> Option<tauri::Monitor> {
 
 #[cfg(not(windows))]
 fn get_cursor_monitor(app: &tauri::AppHandle) -> Option<tauri::Monitor> {
-    app.primary_monitor().ok().flatten()
+    app.cursor_position()
+        .ok()
+        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten())
 }
 
 fn position_capsule_window(app: &tauri::AppHandle) {
@@ -2922,8 +3089,12 @@ fn position_capsule_window(app: &tauri::AppHandle) {
 
         if let Some(monitor) = get_cursor_monitor(app) {
             let scale = monitor.scale_factor();
-            let mon_pos = monitor.position();
-            let mon_size = monitor.size();
+            #[cfg(not(target_os = "macos"))]
+            let (mon_pos, mon_size) = (monitor.position(), monitor.size());
+            // macOS: the work area starts below the menu bar (and a MacBook's camera notch), where the capsule
+            // must sit to be seen.
+            #[cfg(target_os = "macos")]
+            let (mon_pos, mon_size) = (&monitor.work_area().position, &monitor.work_area().size);
 
             let mx = mon_pos.x as f64 / scale;
             let my = mon_pos.y as f64 / scale;
@@ -2938,7 +3109,7 @@ fn position_capsule_window(app: &tauri::AppHandle) {
 }
 
 fn spawn_capsule_window(app: &tauri::AppHandle) {
-    let built = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         "capsule",
         WebviewUrl::App("capsule.html".into()),
@@ -2952,8 +3123,12 @@ fn spawn_capsule_window(app: &tauri::AppHandle) {
     .shadow(false)
     .resizable(false)
     .focused(false)
-    .visible(false)
-    .build();
+    .visible(false);
+    // macOS: never the key window (typing stays in the app in front), and a click on a button reaches it even
+    // while another app is active.
+    #[cfg(target_os = "macos")]
+    let builder = builder.focusable(false).accept_first_mouse(true);
+    let built = builder.build();
 
     match built {
         Ok(window) => {
@@ -2991,6 +3166,17 @@ fn bridge_capsule_show(app: &tauri::AppHandle, visible: bool) {
                 return;
             }
         }
+        // macOS: shown without becoming the key window or activating Ivy, on the main thread AppKit requires.
+        #[cfg(target_os = "macos")]
+        {
+            let capsule = window.clone();
+            let _ = window.run_on_main_thread(move || {
+                if let Ok(ns_window) = capsule.ns_window() {
+                    unsafe { macos::capsule_show(ns_window, visible) };
+                }
+            });
+        }
+        #[cfg(not(target_os = "macos"))]
         if visible {
             let _ = window.show();
         } else {
@@ -3046,7 +3232,7 @@ fn prewarm(app: &tauri::AppHandle) {
         let t_warm = std::time::Instant::now();
         match lite::engine(&models, !prefer_gpu) {
             Ok(eng) => {
-                let backend = if eng.is_cpu_mode { "CPU" } else { "GPU (Vulkan)" };
+                let backend = if eng.is_cpu_mode { "CPU" } else { GPU_BACKEND };
                 let _ = eng.transcribe(&vec![0.0; 16_000], &[], std::time::Duration::from_secs(60));
                 debug_log(&app, &format!("lite engine pre-warmed via {backend} in {}ms (incl. a silent warm-up pass)", t_warm.elapsed().as_millis()));
             }
@@ -3112,16 +3298,7 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
     let id = next_dictation_id();
     ACTIVE_ID.store(id, Ordering::SeqCst);
     let fg = capture_foreground_hwnd();
-    let capsule_hwnd = app
-        .get_webview_window("capsule")
-        .and_then(|w| w.hwnd().ok())
-        .map(|h| h.0 as isize)
-        .unwrap_or(0);
-    let main_hwnd = app
-        .get_webview_window("main")
-        .and_then(|w| w.hwnd().ok())
-        .map(|h| h.0 as isize)
-        .unwrap_or(0);
+    let (capsule_hwnd, main_hwnd) = own_window_ids(app);
     let target_hwnd = if fg != 0 && fg != capsule_hwnd && fg != main_hwnd && !is_explorer_shell(fg) { fg } else { 0 };
     let for_wizard = WIZARD_ACTIVE.load(Ordering::SeqCst) && fg != 0 && fg == main_hwnd;
     if target_hwnd != 0 {
@@ -3468,18 +3645,29 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
     #[cfg(windows)]
     let target = unsafe { GetForegroundWindow().0 as isize };
     #[cfg(not(windows))]
-    let target = 0;
+    let target = capture_foreground_hwnd();
 
-    let capsule_hwnd = app
-        .get_webview_window("capsule")
-        .and_then(|w| w.hwnd().ok())
-        .map(|h| h.0 as isize)
-        .unwrap_or(0);
-    let main_hwnd = app
-        .get_webview_window("main")
-        .and_then(|w| w.hwnd().ok())
-        .map(|h| h.0 as isize)
-        .unwrap_or(0);
+    let (capsule_hwnd, main_hwnd) = own_window_ids(app);
+
+    // macOS: also refused without Accessibility permission (macOS would drop the Cmd+V) and in Finder outside a
+    // text box, the same no-text-box case as Windows' Explorer below.
+    #[cfg(target_os = "macos")]
+    if target == 0 || target == capsule_hwnd || target == main_hwnd || !macos::is_trusted() || !has_text_focus(target) {
+        debug_log(app, &format!("manual-paste: no text box or no Accessibility permission (app {target})"));
+        position_capsule_window(app);
+        bridge_capsule_show(app, true);
+        let _ = app.emit(
+            "ivy://manual-paste",
+            ManualPastePayload {
+                pasted: false,
+                active_app: foreground_app_label(),
+            },
+        );
+        if !macos::is_trusted() {
+            let _ = app.emit("ivy://notice", ACCESSIBILITY_NOTICE);
+        }
+        return;
+    }
 
     #[cfg(windows)]
     if target == 0 || target == capsule_hwnd || target == main_hwnd || is_explorer_shell(target) {
@@ -3554,6 +3742,20 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
             return;
         }
     }
+    #[cfg(target_os = "macos")]
+    if macos::frontmost_pid() as isize != target {
+        debug_log(app, "manual-paste: the app in front changed before the keystroke");
+        position_capsule_window(app);
+        bridge_capsule_show(app, true);
+        let _ = app.emit(
+            "ivy://manual-paste",
+            ManualPastePayload {
+                pasted: false,
+                active_app,
+            },
+        );
+        return;
+    }
 
     let sent = send_ctrl_key(0x56); // VK_V
 
@@ -3624,6 +3826,69 @@ fn cancel_dictation_internal(app: &tauri::AppHandle, reason: &str) {
 #[tauri::command]
 fn cancel_dictation(app: tauri::AppHandle) {
     cancel_dictation_internal(&app, "dictation cancelled by user — discarded audio and state");
+    // macOS: the click on the capsule's X made Ivy the active app; give the front back to the app the user was
+    // typing in, unless Ivy's own window is open.
+    #[cfg(target_os = "macos")]
+    {
+        let main_visible = app.get_webview_window("main").and_then(|w| w.is_visible().ok()).unwrap_or(false);
+        let target = *LAST_EXTERNAL_HWND.lock().unwrap_or_else(|e| e.into_inner()) as i32;
+        if !main_visible && target > 0 && macos::frontmost_pid() == macos::own_pid() {
+            macos::activate(target);
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Permissions {
+    /// macOS Accessibility, which pasting into other apps needs.
+    accessibility: bool,
+    /// "granted", "denied", or "ask" (macOS hasn't asked yet).
+    microphone: &'static str,
+}
+
+/// The permissions macOS asks the user for, for Settings and the setup wizard. Windows has none: always granted.
+#[tauri::command]
+fn get_permissions() -> Permissions {
+    #[cfg(target_os = "macos")]
+    let permissions = Permissions { accessibility: macos::is_trusted(), microphone: macos::mic_permission() };
+    #[cfg(not(target_os = "macos"))]
+    let permissions = Permissions { accessibility: true, microphone: "granted" };
+    permissions
+}
+
+/// macOS: asks for a permission. "accessibility": macOS's own prompt (which adds Ivy to the list) and the list in
+/// System Settings, where the user switches Ivy on. "microphone": a moment of recording brings up macOS's prompt
+/// the first time; after "Don't Allow" only System Settings can change it, so that opens instead.
+#[tauri::command]
+async fn request_permission(kind: String) {
+    #[cfg(target_os = "macos")]
+    match kind.as_str() {
+        "accessibility" => {
+            macos::prompt_trust();
+            macos::open_privacy_settings("Privacy_Accessibility");
+        }
+        "microphone" if macos::mic_permission() == "ask" => {
+            if let Ok(recorder) = audio::Recorder::start("") {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                audio::zeroize_samples(&mut recorder.stop());
+            }
+        }
+        "microphone" => macos::open_privacy_settings("Privacy_Microphone"),
+        _ => {}
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = kind;
+}
+
+/// macOS: the apps running now ("Notes.app"), for the Tone screen's "Add app". Windows picks an .exe instead.
+#[tauri::command]
+fn list_running_apps() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    let apps = macos::running_apps();
+    #[cfg(not(target_os = "macos"))]
+    let apps = Vec::new();
+    apps
 }
 
 #[tauri::command]
@@ -3656,7 +3921,9 @@ fn get_hardware_status(app: tauri::AppHandle) -> HardwareStatusDto {
     let is_evicted = gpu_monitor::is_vram_evicted();
     let on_battery = gpu_monitor::is_on_battery();
 
-    let active_engine = if on_battery {
+    let active_engine = if cfg!(target_os = "macos") {
+        "gpu".to_string()
+    } else if on_battery {
         "cpu".to_string()
     } else if is_evicted {
         "evicted".to_string()
@@ -3774,6 +4041,9 @@ pub fn run() {
             retry_model_download,
             update::check_for_update,
             update::install_update,
+            get_permissions,
+            request_permission,
+            list_running_apps,
         ])
         .setup(move |app| {
             // Was debug-only — meant every `log::info!`/`log::warn!` call
@@ -4016,8 +4286,18 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // macOS: clicking Ivy in the Dock (or opening it again from Finder) while its window is closed brings
+            // the window back, as every Mac app does.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_main_window(app.clone());
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }
 
 #[cfg(test)]
@@ -4110,6 +4390,10 @@ mod tests {
         settings.active_tone_preset = "Professional".to_string();
         assert_eq!(tone_for_label(&settings, "Untitled - Notepad", "notepad.exe"), "Professional");
         assert_eq!(tone_for_label(&settings, "WhatsApp", "WhatsApp.exe"), "Casual");
+        // macOS app bundles match the program the same way
+        settings.preset_apps.insert("Casual".to_string(), vec!["Messages.app".to_string()]);
+        assert_eq!(tone_for_label(&settings, "Messages", "Messages.app"), "Casual");
+        assert_eq!(tone_for_label(&settings, "Messages.app tips - Safari", "Safari.app"), "Professional");
     }
 
     #[test]

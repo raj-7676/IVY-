@@ -26,11 +26,14 @@ import { StageIndicator, OnboardingStage } from './StageIndicator';
 import { HotkeyBadge } from './HotkeyBadge';
 import { SoundwaveVisualizer, DictationVisualState } from './SoundwaveVisualizer';
 import { IvyWordmark } from './IvyWordmark';
+import { PermissionRows, usePermissions } from './MacPermissions';
+import { DEVICE, IS_MAC, keyLabel } from '../utils/platform';
 
-// Setup wizard, rebuilt 2026-10-06. Seven steps: shortcut, held-back text, GPU/CPU, Touch Up, voice test,
-// self-correction, privacy. Both voice steps share one engine (`useWizardDictation`) that follows the
-// backend's own events, so the hotkey, a quick tap, a double-press and the on-screen button all behave the
-// same. Practice dictations made with this window in front are never pasted or saved (lib.rs `for_wizard`).
+// Setup wizard, rebuilt 2026-10-06. Seven steps: shortcut, held-back text, GPU/CPU (on a Mac, which has one chip
+// and no such choice: the two permissions macOS asks for), Touch Up, voice test, self-correction, privacy. Both
+// voice steps share one engine (`useWizardDictation`) that follows the backend's own events, so the hotkey, a
+// quick tap, a double-press and the on-screen button all behave the same. Practice dictations made with this
+// window in front are never pasted or saved (lib.rs `for_wizard`).
 
 interface FirstRunViewProps {
   onDismiss: () => void;
@@ -120,7 +123,7 @@ function useWizardDictation(hotkey: string, active: boolean) {
       listen('ivy://dictation-cancelled', () => {
         if (!mine.current || stateRef.current !== 'listening') return;
         mine.current = false;
-        setMessage(`Keep holding ${hotkeyRef.current} while you speak, then let go.`);
+        setMessage(`Keep holding ${keyLabel(hotkeyRef.current)} while you speak, then let go.`);
         go('waiting');
       }),
       listen<DictationComplete>('ivy://dictation-complete', (e) => {
@@ -138,7 +141,7 @@ function useWizardDictation(hotkey: string, active: boolean) {
           setMessage(
             p.reason === 'mic_error'
               ? "Couldn't open your microphone. Check Settings → Microphone."
-              : `Didn't catch any speech. Hold ${hotkeyRef.current}, speak, then let go.`,
+              : `Didn't catch any speech. Hold ${keyLabel(hotkeyRef.current)}, speak, then let go.`,
           );
           go('failed');
         }
@@ -348,7 +351,7 @@ const VoicePanel: React.FC<{
               {message}
             </span>
           )}
-          {state === 'waiting' && !message && <span className="text-white/60">Hold {hotkey}, say the line, then let go.</span>}
+          {state === 'waiting' && !message && <span className="text-white/60">Hold {keyLabel(hotkey)}, say the line, then let go.</span>}
         </div>
       </div>
 
@@ -442,7 +445,7 @@ const StepShortcut: React.FC<{ hotkey: string; onPick: (key: string) => void }> 
                       </span>
                     )}
                   </div>
-                  <div className="font-mono font-bold text-white text-sm mb-0.5">{item.key}</div>
+                  <div className="font-mono font-bold text-white text-sm mb-0.5">{keyLabel(item.key)}</div>
                   <div className="text-[11px] text-white/45">{item.desc}</div>
                 </button>
               );
@@ -483,7 +486,7 @@ const StepClipboard: React.FC<{ manualPasteHotkey: string }> = ({ manualPasteHot
           body: (
             <>
               Ivy never overwrites your clipboard (it might hold a password). It keeps the text and you press{' '}
-              <kbd className="font-mono text-white bg-white/[0.1] px-1 rounded">{manualPasteHotkey}</kbd> to paste it where you want.
+              <kbd className="font-mono text-white bg-white/[0.1] px-1 rounded">{keyLabel(manualPasteHotkey)}</kbd> to paste it where you want.
             </>
           ),
           window: 'Held by Ivy',
@@ -584,6 +587,23 @@ const StepHardware: React.FC<{ mode: HardwareMode; onPick: (m: HardwareMode) => 
   </>
 );
 
+/** Step 3 on a Mac: the permissions macOS asks for, before the voice test needs the microphone. */
+const StepMacPermissions: React.FC = () => {
+  const perms = usePermissions();
+  return (
+    <>
+      <Heading
+        icon={<ShieldCheck className="w-8 h-8" />}
+        title="Allow Ivy on your Mac"
+        subtitle="macOS asks before any app can type into other apps or use the microphone. Ivy uses both only while you dictate, and nothing leaves your Mac."
+      />
+      <Card>
+        <PermissionRows perms={perms} />
+      </Card>
+    </>
+  );
+};
+
 const StepTouchUp: React.FC = () => (
   <>
     <Heading
@@ -628,12 +648,12 @@ const StepTouchUp: React.FC = () => (
 
 const StepVoiceTest: React.FC<{ hotkey: string; dictation: ReturnType<typeof useWizardDictation> }> = ({ hotkey, dictation }) => (
   <>
-    <Heading title="Let's test your voice" subtitle={`Hold ${hotkey}, say the line below, and let go.`} />
+    <Heading title="Let's test your voice" subtitle={`Hold ${keyLabel(hotkey)}, say the line below, and let go.`} />
     <VoicePanel
       hotkey={hotkey}
       phraseLabel="Say"
       phrase={TEST_PHRASE}
-      workingText="Transcribing on your PC…"
+      workingText={`Transcribing on your ${DEVICE}…`}
       dictation={dictation}
       result={
         <div
@@ -706,7 +726,7 @@ const StepPrivacy: React.FC = () => (
   <>
     <Heading
       icon={<ShieldCheck className="w-8 h-8" />}
-      title="Your voice stays on your PC."
+      title={`Your voice stays on your ${DEVICE}.`}
       subtitle="Ivy is not a service. It is software that runs entirely on your machine."
     />
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
@@ -739,7 +759,7 @@ const StepPrivacy: React.FC = () => (
 
 const NEXT_LABEL: Record<OnboardingStage, string> = {
   1: 'Next: No text box?',
-  2: 'Next: GPU or CPU',
+  2: IS_MAC ? 'Next: Permissions' : 'Next: GPU or CPU',
   3: 'Next: Touch Up',
   4: 'Next: Test your voice',
   5: 'Next: Change your mind',
@@ -828,7 +848,7 @@ export const FirstRunView: React.FC<FirstRunViewProps> = ({
           >
             {stage === 1 && <StepShortcut hotkey={hotkey} onPick={(key) => onUpdateSettings?.({ hotkey: key })} />}
             {stage === 2 && <StepClipboard manualPasteHotkey={manualPasteHotkey} />}
-            {stage === 3 && <StepHardware mode={hardwareMode} onPick={(m) => onUpdateSettings?.({ hardwareMode: m })} />}
+            {stage === 3 && (IS_MAC ? <StepMacPermissions /> : <StepHardware mode={hardwareMode} onPick={(m) => onUpdateSettings?.({ hardwareMode: m })} />)}
             {stage === 4 && <StepTouchUp />}
             {stage === 5 && <StepVoiceTest hotkey={hotkey} dictation={voiceTest} />}
             {stage === 6 && <StepCorrection hotkey={hotkey} dictation={correction} />}

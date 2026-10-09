@@ -1,6 +1,7 @@
 name: macOS Build
 
-# Builds and tests Ivy on an Apple Silicon runner (macOS port, branch macos-port).
+# Builds, tests and packages Ivy on an Apple Silicon runner (macOS port, branch macos-port), and checks that the
+# speech model hears the same on Metal as on Windows.
 on:
   push:
     branches: [ "macos-port" ]
@@ -11,7 +12,7 @@ permissions:
 
 jobs:
   build-macos:
-    name: Build & test (Apple Silicon)
+    name: Build, test & package (Apple Silicon)
     runs-on: macos-14
     steps:
       - name: Checkout Code
@@ -43,9 +44,58 @@ jobs:
       - name: Build App & DMG
         run: npx tauri build --bundles app,dmg
 
+      - name: Checksum
+        working-directory: src-tauri/target/release/bundle/dmg
+        run: shasum -a 256 *.dmg | tee SHA256SUMS-macos.txt
+
       - name: Upload DMG
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Ivy-macOS-AppleSilicon
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/dmg/SHA256SUMS-macos.txt
           retention-days: 14
+
+  model-check-macos:
+    name: Speech model on Metal matches Windows
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Build Frontend
+        run: |
+          npm ci
+          npm run build
+
+      # The same files, sizes and hashes the app downloads (src-tauri/src/model.rs).
+      - name: Download Speech Model
+        run: |
+          mkdir -p "$RUNNER_TEMP/models/ivy-lite"
+          cd "$RUNNER_TEMP/models/ivy-lite"
+          base=https://github.com/raj-7676/IVY-/releases/download/v0.2.6
+          curl -fsSL --retry 3 -o mmproj-ivy-lite-f16.gguf "$base/mmproj-ivy-lite-f16.gguf"
+          curl -fsSL --retry 3 -o ivy-lite-Q8_0.gguf "$base/ivy-lite-Q8_0.gguf"
+          printf '%s  %s\n' \
+            07ed1cc9c96c19aba84354b9135c69332747a98d50363a321bf1418aececfc00 mmproj-ivy-lite-f16.gguf \
+            da50c4dcfc9bb36baeca3a5dedb742988dbe1058ab282dbb62d8a31be27795ed ivy-lite-Q8_0.gguf \
+            | shasum -a 256 -c -
+
+      - name: Transcribe Test Clips on Metal
+        working-directory: src-tauri
+        env:
+          IVY_MODELS_DIR: ${{ runner.temp }}/models
+        run: cargo test --lib model_matches_reference -- --ignored --nocapture

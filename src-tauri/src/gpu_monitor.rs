@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -91,12 +92,24 @@ pub fn query_gpu_telemetry() -> GpuTelemetry {
         };
     }
     GpuTelemetry {
-        adapter_name: "Default Graphics Adapter".to_string(),
+        adapter_name: default_adapter_name(),
         total_vram_mb: 0,
         used_vram_mb: 0,
         usage_percent: OTHERS_LOAD.load(Ordering::Relaxed),
         is_evicted: is_vram_evicted(),
     }
+}
+
+/// What Settings shows when no adapter could be read; on a Mac, the chip Ivy runs on ("Apple M2").
+fn default_adapter_name() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let chip = crate::macos::chip_name();
+        if !chip.is_empty() {
+            return chip;
+        }
+    }
+    "Default Graphics Adapter".to_string()
 }
 
 /// GPU load the way Task Manager shows it, from Windows' "GPU Engine" counter (NVIDIA, AMD and Intel all
@@ -172,6 +185,7 @@ impl Drop for GpuLoad {
     }
 }
 
+#[cfg(windows)]
 /// Programs that may be full screen while the user still wants to dictate (Yash, 2026-10-06: "if I full
 /// screen Brave, Ivy should not close"): browsers, terminals, editors, and the desktop/Explorer.
 const KEEP_AWAKE_IN_FULL_SCREEN: &[&str] = &[
@@ -195,6 +209,7 @@ fn fullscreen_app_in_front() -> bool {
 }
 
 /// What the monitor tells Ivy.
+#[cfg_attr(not(windows), allow(dead_code))] // the monitor only runs on Windows
 pub enum Event {
     /// A full-screen app came to the front: unload the model, stop listening for the hotkey, stay silent.
     Sleep,
@@ -223,6 +238,14 @@ where
     S: Fn() -> (bool, u32, bool) + Send + 'static,
     F: Fn(Event) -> bool + Send + Sync + 'static,
 {
+    // Windows only: full-screen detection and GPU load come from Windows' own counters. On a Mac neither rule
+    // applies (Settings hides the switch there).
+    #[cfg(not(windows))]
+    {
+        drop((settings, on_event));
+        return;
+    }
+    #[allow(unreachable_code)]
     std::thread::Builder::new()
         .name("ivy-gpu-monitor".to_string())
         .spawn(move || {

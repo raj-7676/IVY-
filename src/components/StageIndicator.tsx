@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check } from 'lucide-react';
+import { IS_MAC } from '../utils/platform';
 
 export type OnboardingStage = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -17,7 +18,7 @@ export const StageIndicator: React.FC<StageIndicatorProps> = React.memo(({
   const steps: { stage: OnboardingStage; label: string }[] = [
     { stage: 1, label: '1. Shortcut' },
     { stage: 2, label: '2. No text box' },
-    { stage: 3, label: '3. GPU or CPU' },
+    { stage: 3, label: IS_MAC ? '3. Permissions' : '3. GPU or CPU' },
     { stage: 4, label: '4. Touch Up' },
     { stage: 5, label: '5. Voice test' },
     { stage: 6, label: '6. Self-correction' },

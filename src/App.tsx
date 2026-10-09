@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow, Effect } from '@tauri-apps/api/window';
+import { getCurrentWindow, Effect, EffectState } from '@tauri-apps/api/window';
 import { Sidebar } from './components/Sidebar';
 import { HomeView } from './components/HomeView';
 import { HistoryView } from './components/HistoryView';
@@ -16,7 +16,9 @@ import { IvyLogo } from './components/IvyLogo';
 import { IntroFilm, ModelDownloadBanner, ModelDownloadScreen, needsDownload, useModelStatus } from './components/ModelDownload';
 import { INITIAL_DICTATIONS, INITIAL_SETTINGS } from './defaults';
 import { ScreenState, DictationSession, SettingsConfig, UserStats } from './types';
-import { Film, Minus, Square, X } from 'lucide-react';
+import { Film, Minus, Plus, Square, X } from 'lucide-react';
+import { IS_MAC, keyLabel } from './utils/platform';
+import { requestPermission, usePermissions } from './components/MacPermissions';
 
 const ACCENT_RGB = '255, 107, 0';
 
@@ -169,16 +171,33 @@ export default function App() {
     };
   }, []);
 
-  // Real desktop blur comes from Windows (Acrylic); CSS backdrop-filter can't see behind the window.
+  // Real desktop blur comes from Windows (Acrylic), or on a Mac from its own dark glass material, rounded like the
+  // window and kept on while Ivy isn't the active app; CSS backdrop-filter can't see behind the window.
   const blurOn = settings.glassBlur > 0;
   useEffect(() => {
     try {
       const win = getCurrentWindow();
-      (blurOn ? win.setEffects({ effects: [Effect.Acrylic] }) : win.clearEffects()).catch(() => {});
+      const effects = IS_MAC
+        ? { effects: [Effect.HudWindow], state: EffectState.Active, radius: 12 }
+        : { effects: [Effect.Acrylic] };
+      (blurOn ? win.setEffects(effects) : win.clearEffects()).catch(() => {});
     } catch {
       /* no Tauri host */
     }
   }, [blurOn]);
+
+  // macOS: pasting needs the Accessibility permission, which every update asks for again (Ivy isn't signed
+  // with an Apple certificate), so the main window says when it's missing.
+  const perms = usePermissions(IS_MAC);
+  const minimize = () => {
+    window.dispatchEvent(new Event('ivy:window-hiding'));
+    invoke('minimize_main');
+  };
+  const toggleMaximize = () => invoke('toggle_maximize_main');
+  const close = () => {
+    window.dispatchEvent(new Event('ivy:window-hiding'));
+    invoke('close_main');
+  };
 
   const handleDeleteSession = useCallback((id: string) => {
     setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -225,8 +244,9 @@ export default function App() {
       // No CSS border or rim shadows: Windows draws the window's own thin neutral border. The old orange
       // border and top highlight showed only on the top and left edges, which looked like a stray orange
       // line (Yash, 2026-10-07).
+      // macOS doesn't round a frameless window itself, so the page does (the window behind it is transparent).
       style={{ backgroundColor: `rgba(10, 8, 14, ${settings.glassOpacity / 100})` }}
-      className="relative flex flex-col h-screen w-screen overflow-hidden antialiased select-none"
+      className={`relative flex flex-col h-screen w-screen overflow-hidden antialiased select-none ${IS_MAC ? 'rounded-[12px]' : ''}`}
     >
       {/* Cinematic Launch Intro with smooth zoom-out-and-dock */}
       {intro === 'play' && (
@@ -253,16 +273,41 @@ export default function App() {
         data-tauri-drag-region
         className={`relative z-[100] h-11 flex items-center justify-between px-4 shrink-0 border-b border-white/[0.07] ${intro !== 'off' || replayFilm ? 'invisible' : ''}`}
       >
-        <button
-          type="button"
-          onClick={() => setIntro('play')}
-          title="Replay intro"
-          className="flex items-center gap-2 cursor-pointer"
-        >
-          <IvyLogo size={18} glow={true} />
-          <span className="text-[13px] font-semibold tracking-tight text-white/90">Ivy</span>
-          <span className="text-[11px] font-medium text-white/35">v{__IVY_VERSION__}</span>
-        </button>
+        <div className="flex items-center gap-4">
+          {/* macOS: the window buttons sit on the left, red, yellow and green, as on every Mac window. */}
+          {IS_MAC && (
+            <div className="group/lights flex items-center gap-2">
+              {(
+                [
+                  ['Close', close, '#ff5f57', <X key="x" className="w-2 h-2 stroke-[3]" />],
+                  ['Minimize', minimize, '#febc2e', <Minus key="m" className="w-2 h-2 stroke-[3]" />],
+                  ['Zoom', toggleMaximize, '#28c840', <Plus key="p" className="w-2 h-2 stroke-[3]" />],
+                ] as const
+              ).map(([title, onClick, color, glyph]) => (
+                <button
+                  key={title}
+                  type="button"
+                  onClick={onClick}
+                  title={title}
+                  className="w-3 h-3 rounded-full flex items-center justify-center text-black/60 [&>svg]:opacity-0 group-hover/lights:[&>svg]:opacity-100"
+                  style={{ backgroundColor: color }}
+                >
+                  {glyph}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setIntro('play')}
+            title="Replay intro"
+            className="flex items-center gap-2 cursor-pointer"
+          >
+            <IvyLogo size={18} glow={true} />
+            <span className="text-[13px] font-semibold tracking-tight text-white/90">Ivy</span>
+            <span className="text-[11px] font-medium text-white/35">v{__IVY_VERSION__}</span>
+          </button>
+        </div>
 
         <div className="flex items-center gap-3">
           <button
@@ -278,39 +323,56 @@ export default function App() {
           <div className="hidden md:flex items-center gap-1.5 text-[11px] text-white/45">
             <span>Hold</span>
             <kbd className="px-1.5 py-0.5 rounded-md bg-white/[0.07] border border-white/[0.1] text-white/80 text-[10px]">
-              {settings.hotkey || 'Alt+Space'}
+              {keyLabel(settings.hotkey || 'Alt + Space')}
             </kbd>
             <span>anywhere to dictate</span>
           </div>
 
-          <div className="flex items-center gap-0.5">
-            <button
-              id="win-minimize"
-              onClick={() => { window.dispatchEvent(new Event('ivy:window-hiding')); invoke('minimize_main'); }}
-              className="w-8 h-7 flex items-center justify-center rounded-lg text-white/45 hover:bg-white/[0.1] hover:text-white transition-colors duration-150"
-              title="Minimize"
-            >
-              <Minus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              id="win-maximize"
-              onClick={() => invoke('toggle_maximize_main')}
-              className="w-8 h-7 flex items-center justify-center rounded-lg text-white/45 hover:bg-white/[0.1] hover:text-white transition-colors duration-150"
-              title="Maximize"
-            >
-              <Square className="w-3 h-3" />
-            </button>
-            <button
-              id="win-close"
-              onClick={() => { window.dispatchEvent(new Event('ivy:window-hiding')); invoke('close_main'); }}
-              className="w-8 h-7 flex items-center justify-center rounded-lg text-white/45 hover:bg-red-500 hover:text-white transition-colors duration-150"
-              title="Close"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          {!IS_MAC && (
+            <div className="flex items-center gap-0.5">
+              <button
+                id="win-minimize"
+                onClick={minimize}
+                className="w-8 h-7 flex items-center justify-center rounded-lg text-white/45 hover:bg-white/[0.1] hover:text-white transition-colors duration-150"
+                title="Minimize"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                id="win-maximize"
+                onClick={toggleMaximize}
+                className="w-8 h-7 flex items-center justify-center rounded-lg text-white/45 hover:bg-white/[0.1] hover:text-white transition-colors duration-150"
+                title="Maximize"
+              >
+                <Square className="w-3 h-3" />
+              </button>
+              <button
+                id="win-close"
+                onClick={close}
+                className="w-8 h-7 flex items-center justify-center rounded-lg text-white/45 hover:bg-red-500 hover:text-white transition-colors duration-150"
+                title="Close"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </header>
+
+      {IS_MAC && perms && !perms.accessibility && currentScreen !== 'first-run' && (
+        <div className="relative z-10 mx-4 mt-2 shrink-0 flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl text-xs font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25">
+          <span>
+            Ivy can't type into other apps until you allow it in System Settings › Privacy &amp; Security ›
+            Accessibility. After an update, switch Ivy off and on there.
+          </span>
+          <button
+            onClick={() => requestPermission('accessibility')}
+            className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200"
+          >
+            Open settings
+          </button>
+        </div>
+      )}
 
       {settingsError && (
         <div className="relative z-10 mx-4 mt-2 shrink-0 flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl text-xs font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25">
