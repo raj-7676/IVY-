@@ -27,7 +27,9 @@ import { HotkeyBadge } from './HotkeyBadge';
 import { SoundwaveVisualizer, DictationVisualState } from './SoundwaveVisualizer';
 import { IvyWordmark } from './IvyWordmark';
 import { PermissionRows, usePermissions } from './MacPermissions';
-import { DEVICE, IS_MAC, keyLabel } from '../utils/platform';
+import { DEVICE, IS_LINUX, IS_MAC, keyLabel, useDesktop } from '../utils/platform';
+import { INITIAL_SETTINGS } from '../defaults';
+import { LinuxKeyboardNotice } from './LinuxKeyboard';
 
 // Setup wizard, rebuilt 2026-10-06. Seven steps: shortcut, held-back text, GPU/CPU (on a Mac, which has one chip
 // and no such choice: the two permissions macOS asks for), Touch Up, voice test, self-correction, privacy. Both
@@ -51,10 +53,16 @@ const LAST_STAGE: OnboardingStage = 7;
 // A minute of speech takes ~20 s on CPU; anything far past that means the backend never answered.
 const NO_ANSWER_MS = 90_000;
 
-const HOTKEY_CHOICES = [
-  { key: 'Alt + Space', label: 'Default', desc: 'Easy thumb + finger' },
-  { key: 'Ctrl + Shift', label: 'Alternative', desc: 'Hold both keys' },
-];
+// Linux desktops use Alt + Space themselves (lib.rs DEFAULT_HOTKEY), so Ctrl + Shift comes first there.
+const HOTKEY_CHOICES = IS_LINUX
+  ? [
+      { key: 'Ctrl + Shift', label: 'Default', desc: 'Hold both keys' },
+      { key: 'Alt + Space', label: 'Alternative', desc: 'If your desktop leaves it free' },
+    ]
+  : [
+      { key: 'Alt + Space', label: 'Default', desc: 'Easy thumb + finger' },
+      { key: 'Ctrl + Shift', label: 'Alternative', desc: 'Hold both keys' },
+    ];
 
 // ---------------------------------------------------------------------------------------------------------
 // Shared engine for the two voice steps
@@ -403,6 +411,9 @@ const StepShortcut: React.FC<{ hotkey: string; onPick: (key: string) => void }> 
     return () => subs.forEach((s) => s.then((off) => off()).catch(() => undefined));
   }, []);
   useEffect(() => setHeard(false), [hotkey]);
+  // Linux on Wayland: no app may take Alt + Space from the desktop, so Ctrl + Shift is the only choice there.
+  const wayland = useDesktop()?.wayland ?? false;
+  const choices = HOTKEY_CHOICES.filter((c) => !wayland || c.key === 'Ctrl + Shift');
 
   return (
     <>
@@ -422,9 +433,16 @@ const StepShortcut: React.FC<{ hotkey: string; onPick: (key: string) => void }> 
         </div>
 
         <div className="w-full text-left">
-          <span className="text-[11px] uppercase tracking-wider text-white/50 font-semibold mb-2.5 block">Pick one</span>
+          <span className="text-[11px] uppercase tracking-wider text-white/50 font-semibold mb-2.5 block">
+            {wayland ? 'Your key on this desktop' : 'Pick one'}
+          </span>
+          {wayland && (
+            <p className="text-xs text-white/55 leading-relaxed mb-2.5">
+              On this desktop (Wayland) no app can take Alt + Space from the system, so Ivy listens for Ctrl + Shift.
+            </p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {HOTKEY_CHOICES.map((item) => {
+            {choices.map((item) => {
               const picked = hotkey === item.key;
               return (
                 <button
@@ -466,7 +484,10 @@ const StepShortcut: React.FC<{ hotkey: string; onPick: (key: string) => void }> 
   );
 };
 
-const StepClipboard: React.FC<{ manualPasteHotkey: string }> = ({ manualPasteHotkey }) => (
+const StepClipboard: React.FC<{ manualPasteHotkey: string }> = ({ manualPasteHotkey }) => {
+  // Linux on Wayland has no held-back paste key (no app may claim Alt + V there): the text waits in History.
+  const wayland = useDesktop()?.wayland ?? false;
+  return (
   <>
     <Heading title="No text box? No problem." subtitle="Ivy types where your cursor is, and never loses what you said." />
     <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -483,7 +504,9 @@ const StepClipboard: React.FC<{ manualPasteHotkey: string }> = ({ manualPasteHot
           icon: <ClipboardCheck className="w-4 h-4" />,
           tag: 'No text box',
           title: 'Held for you',
-          body: (
+          body: wayland ? (
+            <>Ivy never overwrites your clipboard (it might hold a password). If it can't paste, your words wait in History, where one click copies them.</>
+          ) : (
             <>
               Ivy never overwrites your clipboard (it might hold a password). It keeps the text and you press{' '}
               <kbd className="font-mono text-white bg-white/[0.1] px-1 rounded">{keyLabel(manualPasteHotkey)}</kbd> to paste it where you want.
@@ -513,10 +536,23 @@ const StepClipboard: React.FC<{ manualPasteHotkey: string }> = ({ manualPasteHot
       ))}
     </div>
   </>
-);
+  );
+};
 
-const StepHardware: React.FC<{ mode: HardwareMode; onPick: (m: HardwareMode) => void }> = ({ mode, onPick }) => (
+const StepHardware: React.FC<{ mode: HardwareMode; onPick: (m: HardwareMode) => void }> = ({ mode, onPick }) => {
+  // Linux: the keyboard helper's state on Wayland (shown only when it doesn't work), and no graphics card
+  // llama.cpp can use, which means the CPU whatever is picked (lib.rs should_use_gpu).
+  const desktop = useDesktop();
+  const [noGpu, setNoGpu] = useState(false);
+  useEffect(() => {
+    if (!IS_LINUX) return;
+    invoke<{ gpuName: string }>('get_hardware_status')
+      .then((s) => setNoGpu(s.gpuName === ''))
+      .catch(() => {});
+  }, []);
+  return (
   <>
+    <LinuxKeyboardNotice desktop={desktop} className="w-full mb-4 text-left" />
     <Heading title="Where should Ivy run?" subtitle="Same model and same results either way; the GPU is just faster. Change it anytime in Settings." />
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
       {(
@@ -527,7 +563,8 @@ const StepHardware: React.FC<{ mode: HardwareMode; onPick: (m: HardwareMode) => 
             name: 'GPU',
             tag: 'Best if you have a graphics card',
             body: 'Runs on your graphics card (NVIDIA, AMD or Intel). A 1-minute dictation is ready in about 2 seconds.',
-            foot: '⚡ Fastest. Steps aside for games and full-screen video.',
+            // Only Windows has the full-screen rule (gpu_monitor.rs).
+            foot: IS_LINUX ? '⚡ Fastest.' : '⚡ Fastest. Steps aside for games and full-screen video.',
           },
           {
             id: 'cpu' as HardwareMode,
@@ -539,13 +576,16 @@ const StepHardware: React.FC<{ mode: HardwareMode; onPick: (m: HardwareMode) => 
           },
         ]
       ).map((c) => {
-        const picked = mode === c.id;
+        // No usable graphics card: GPU can't be picked, and CPU is what runs.
+        const off = noGpu && c.id === 'gpu';
+        const picked = noGpu ? c.id === 'cpu' : mode === c.id;
         return (
           <button
             key={c.id}
             type="button"
-            onClick={() => !picked && onPick(c.id)}
-            className={`rounded-2xl p-4 border transition-all cursor-pointer flex flex-col justify-between text-left ${
+            disabled={off}
+            onClick={() => !picked && !off && onPick(c.id)}
+            className={`rounded-2xl p-4 border transition-all flex flex-col justify-between text-left ${off ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
               picked ? 'bg-[#FF6B00]/10 border-[#FF6B00] shadow-[0_0_25px_rgba(255,107,0,0.25)]' : 'bg-white/[0.03] hover:bg-white/[0.06] border-white/10'
             }`}
           >
@@ -562,7 +602,9 @@ const StepHardware: React.FC<{ mode: HardwareMode; onPick: (m: HardwareMode) => 
                   {picked && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
                 </span>
               </div>
-              <p className="text-[11.5px] text-white/70 mt-3 leading-relaxed">{c.body}</p>
+              <p className="text-[11.5px] text-white/70 mt-3 leading-relaxed">
+                {off ? 'Ivy found no graphics card it can use on this PC (it needs one with a Vulkan driver), so it runs on the CPU.' : c.body}
+              </p>
             </div>
             <span className="text-[10px] text-[#FFA133] font-medium mt-3 block">{c.foot}</span>
           </button>
@@ -585,7 +627,8 @@ const StepHardware: React.FC<{ mode: HardwareMode; onPick: (m: HardwareMode) => 
       </div>
     </div>
   </>
-);
+  );
+};
 
 /** Step 3 on a Mac: the permissions macOS asks for, before the voice test needs the microphone. */
 const StepMacPermissions: React.FC = () => {
@@ -604,12 +647,19 @@ const StepMacPermissions: React.FC = () => {
   );
 };
 
-const StepTouchUp: React.FC = () => (
+const StepTouchUp: React.FC = () => {
+  // Linux on Wayland: offered only after a paste into an app Ivy can see (lib.rs DictationComplete.touch_up).
+  const wayland = useDesktop()?.wayland ?? false;
+  return (
   <>
     <Heading
       icon={<Wand2 className="w-7 h-7" />}
       title="Spot a typo? One click fixes it."
-      subtitle="Right after Ivy types, a small Touch Up button shows on the capsule for 7 seconds. Click it only if you see a typo."
+      subtitle={
+        wayland
+          ? 'Right after Ivy types into an app it can tell apart (on this desktop, Wayland: not every app), a small Touch Up button shows on the capsule for 7 seconds. Click it only if you see a typo.'
+          : 'Right after Ivy types, a small Touch Up button shows on the capsule for 7 seconds. Click it only if you see a typo.'
+      }
     />
     <div
       className="w-full rounded-2xl p-4 sm:p-5 flex flex-col gap-3.5"
@@ -644,7 +694,8 @@ const StepTouchUp: React.FC = () => (
       </Note>
     </div>
   </>
-);
+  );
+};
 
 const StepVoiceTest: React.FC<{ hotkey: string; dictation: ReturnType<typeof useWizardDictation> }> = ({ hotkey, dictation }) => (
   <>
@@ -770,7 +821,7 @@ const NEXT_LABEL: Record<OnboardingStage, string> = {
 export const FirstRunView: React.FC<FirstRunViewProps> = ({
   onDismiss,
   onComplete,
-  hotkey = 'Alt + Space',
+  hotkey = INITIAL_SETTINGS.hotkey,
   manualPasteHotkey = 'Alt + V',
   hardwareMode = 'gpu',
   onUpdateSettings,

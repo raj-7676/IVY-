@@ -25,6 +25,9 @@ pub fn is_on_battery() -> bool {
             return status.ACLineStatus == 0;
         }
     }
+    #[cfg(target_os = "linux")]
+    return crate::linux::on_battery();
+    #[allow(unreachable_code)]
     false
 }
 
@@ -100,7 +103,8 @@ pub fn query_gpu_telemetry() -> GpuTelemetry {
     }
 }
 
-/// What Settings shows when no adapter could be read; on a Mac, the chip Ivy runs on ("Apple M2").
+/// What Settings shows when no adapter could be read; on a Mac, the chip Ivy runs on ("Apple M2"); on Linux, the
+/// GPU llama.cpp's Vulkan sees, or "" for none (Settings then says Ivy runs on the CPU).
 fn default_adapter_name() -> String {
     #[cfg(target_os = "macos")]
     {
@@ -109,6 +113,9 @@ fn default_adapter_name() -> String {
             return chip;
         }
     }
+    #[cfg(target_os = "linux")]
+    return crate::linux::gpu().unwrap_or_default().to_string();
+    #[allow(unreachable_code)]
     "Default Graphics Adapter".to_string()
 }
 
@@ -238,8 +245,8 @@ where
     S: Fn() -> (bool, u32, bool) + Send + 'static,
     F: Fn(Event) -> bool + Send + Sync + 'static,
 {
-    // Windows only: full-screen detection and GPU load come from Windows' own counters. On a Mac neither rule
-    // applies (Settings hides the switch there).
+    // Windows only: full-screen detection and GPU load come from Windows' own counters. On a Mac or Linux neither
+    // rule applies (Settings hides the switch there).
     #[cfg(not(windows))]
     {
         drop((settings, on_event));

@@ -1,0 +1,4 @@
+# Ivy (offline dictation): lets the "input" group use the virtual keyboard device, which Ivy's keyboard helper
+# /usr/libexec/ivy-keys (installed setgid "input") needs to paste on Wayland desktops. Keyboards themselves are
+# already readable by that group. Users aren't put in the group; only the helper runs with it.
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"

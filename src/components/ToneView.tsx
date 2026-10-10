@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Plus, X } from 'lucide-react';
 import { SettingsConfig, TonePreset } from '../types';
-import { IS_MAC } from '../utils/platform';
+import { IS_LINUX, IS_MAC, useDesktop } from '../utils/platform';
 import { useEscape } from '../utils/useEscape';
 
 interface ToneViewProps {
@@ -46,13 +46,18 @@ const InUse: React.FC = () => (
   </span>
 );
 
-/** "Slack.app" reads "Slack"; the list keeps the bundle's full name, which is what Ivy matches on (lib.rs). */
-const appLabel = (app: string) => app.replace(/\.app$/i, '');
+/** "Slack.app" reads "Slack", Linux's "discord" reads "Discord"; the list keeps the bundle's full name or the
+ *  window class, which is what Ivy matches on (lib.rs). */
+const appLabel = (app: string) => {
+  const name = app.replace(/\.app$/i, '');
+  return IS_LINUX ? name.charAt(0).toUpperCase() + name.slice(1) : name;
+};
 
 const addAppStyle =
   'inline-flex items-center gap-1.5 cursor-pointer border border-dashed border-white/[0.16] hover:border-white/[0.3] rounded-full px-3.5 py-1.5 text-[12px] text-white/70 transition-colors duration-150';
 
-/** macOS: an app is picked from the ones running now; an .app bundle can't go through a file picker. */
+/** macOS and Linux: an app is picked from the ones running now; an .app bundle can't go through a file picker, and a
+ *  Linux program is known by its window. */
 const RunningAppPicker: React.FC<{ apps: string[]; onPick: (app: string) => void }> = ({ apps, onPick }) => {
   const [open, setOpen] = useState(false);
   const [running, setRunning] = useState<string[] | null>(null);
@@ -135,7 +140,7 @@ const AppList: React.FC<{
             </button>
           </span>
         ))}
-        {IS_MAC ? (
+        {IS_MAC || IS_LINUX ? (
           <RunningAppPicker apps={apps} onPick={(app) => onChange([...apps, app])} />
         ) : (
           <label className={addAppStyle} title="Pick the app's .exe file">
@@ -150,6 +155,7 @@ const AppList: React.FC<{
 };
 
 export const ToneView: React.FC<ToneViewProps> = ({ settings, onUpdateSettings }) => {
+  const desktop = useDesktop();
   const inUse = settings.activeTonePreset;
   const shown = TONES.find((t) => t.id === inUse);
   // Three modes (Yash, 2026-10-06): a click takes effect at once for every app not added below.
@@ -209,9 +215,11 @@ export const ToneView: React.FC<ToneViewProps> = ({ settings, onUpdateSettings }
           <div>
             <div className="text-[13px] font-medium text-white/85">Add your apps</div>
             <p className="text-[11.5px] text-white/30 mt-1">
-              {IS_MAC
+              {IS_MAC || IS_LINUX
                 ? 'Open the app, then click "Add app" and pick it from the apps open right now. That app then always uses that mode.'
                 : `Click "Add app" and pick the program's .exe (for example brave.exe, usually in C:\\Program Files). That program then always uses that mode.`}
+              {desktop?.wayland &&
+                ' On this desktop (Wayland) Ivy can tell apart only the apps it lists there; every other app gets the mode clicked above.'}
             </p>
           </div>
           {TONES.map((tone) => (

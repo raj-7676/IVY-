@@ -1,0 +1,123 @@
+name: Linux Build
+
+# Builds, tests and packages Ivy on Linux (branch linux-port), and checks that the speech model hears the same on
+# Linux as on Windows: on the CPU, and on Vulkan through Mesa's software driver (the runners have no GPU).
+on:
+  push:
+    branches: [ "linux-port" ]
+    # Notes alone don't change the app.
+    paths-ignore: [ "**.md", "docs/**" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # WebKitGTK, the tray, ALSA, and llama.cpp's Vulkan backend (headers, shader compiler, SPIR-V headers); Ninja for
+  # .cargo/config.toml.
+  BUILD_DEPS: >-
+    libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+    libvulkan-dev glslc spirv-headers ninja-build
+
+jobs:
+  build-linux:
+    name: Build, test & package (x86-64)
+    # The oldest Ubuntu GitHub still runs: built against its glibc (2.35), the packages also install on Ubuntu
+    # 22.04 and later, Debian 12, Linux Mint 21 and Fedora 37 and later.
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $BUILD_DEPS
+
+      # tauri-build needs ../dist at compile time.
+      - name: Build Frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Cargo Tests
+        working-directory: src-tauri
+        run: cargo test --lib -- --test-threads=1
+
+      - name: Keyboard Helper Tests
+        working-directory: src-tauri/linux/ivy-keys
+        run: cargo test --locked
+
+      # Also builds the keyboard helper (tauri.linux.conf.json beforeBundleCommand).
+      - name: Build Packages
+        run: npx tauri build --bundles deb,rpm
+
+      - name: Checksums
+        run: |
+          mkdir out
+          cp src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/rpm/*.rpm out/
+          cd out && sha256sum * | tee SHA256SUMS-linux.txt
+
+      - name: Upload Packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Ivy-Linux-x86_64
+          path: out/
+          retention-days: 14
+
+  model-check-linux:
+    name: Speech model on Linux matches Windows
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # mesa-vulkan-drivers: llvmpipe, Mesa's Vulkan on the CPU, standing in for a GPU.
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $BUILD_DEPS mesa-vulkan-drivers
+
+      - name: Build Frontend
+        run: |
+          npm ci
+          npm run build
+
+      # The same files, sizes and hashes the app downloads (src-tauri/src/model.rs).
+      - name: Download Speech Model
+        run: |
+          mkdir -p "$RUNNER_TEMP/models/ivy-lite"
+          cd "$RUNNER_TEMP/models/ivy-lite"
+          base=https://github.com/raj-7676/IVY-/releases/download/v0.2.6
+          curl -fsSL --retry 3 -o mmproj-ivy-lite-f16.gguf "$base/mmproj-ivy-lite-f16.gguf"
+          curl -fsSL --retry 3 -o ivy-lite-Q8_0.gguf "$base/ivy-lite-Q8_0.gguf"
+          printf '%s  %s\n' \
+            07ed1cc9c96c19aba84354b9135c69332747a98d50363a321bf1418aececfc00 mmproj-ivy-lite-f16.gguf \
+            da50c4dcfc9bb36baeca3a5dedb742988dbe1058ab282dbb62d8a31be27795ed ivy-lite-Q8_0.gguf \
+            | sha256sum -c -
+
+      # GGML_VK_VISIBLE_DEVICES=0: llama.cpp skips software Vulkan unless told to use it.
+      - name: Transcribe Test Clips on CPU and Vulkan
+        working-directory: src-tauri
+        env:
+          IVY_MODELS_DIR: ${{ runner.temp }}/models
+          GGML_VK_VISIBLE_DEVICES: "0"
+        run: cargo test --release --lib model_matches_reference -- --ignored --nocapture

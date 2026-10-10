@@ -19,5 +19,18 @@ fn main() {
        --disable-component-update --disable-domain-reliability --disable-sync {extra}"
     ),
   );
+  // Linux, before GTK starts (whatever the user set wins):
+  // - On a Wayland desktop Ivy's windows are X11 windows (XWayland): Wayland lets no app place a window or keep it
+  //   above others, which the capsule needs (src/linux.rs).
+  // - WebKitGTK's DMA-BUF renderer leaves the window blank on some NVIDIA drivers.
+  #[cfg(target_os = "linux")]
+  {
+    if std::env::var_os("GDK_BACKEND").is_none() && std::env::var_os("DISPLAY").is_some() {
+      std::env::set_var("GDK_BACKEND", "x11");
+    }
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+      std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+  }
   app_lib::run();
 }

@@ -285,8 +285,14 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
                   never touches the real clipboard when it can't find a
                   text field (that used to silently destroy whatever the
                   user had actually copied, e.g. a password or API key). */}
+              {/* No app name: an app on Linux's Wayland that Ivy can't see. No held-back key there either (no
+                  Alt + V on Wayland): the text waits in History. */}
               <span className="text-[11.5px] font-medium text-white truncate">
-                {pasted ? `Pasted to ${activeApp}` : `Couldn't paste automatically — press ${manualPasteHotkey} to paste it`}
+                {pasted
+                  ? activeApp ? `Pasted to ${activeApp}` : 'Pasted'
+                  : manualPasteHotkey
+                  ? `Couldn't paste automatically — press ${manualPasteHotkey} to paste it`
+                  : "Couldn't paste here — it's saved in History"}
               </span>
             </motion.div>
           )}
@@ -308,7 +314,7 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
                 <Check className={`w-3 h-3 stroke-[2.5] ${pasted ? 'text-emerald-400' : 'text-white/80'}`} />
               </div>
               <span className="text-[11.5px] font-medium text-white truncate">
-                {pasted ? `Pasted to ${activeApp}` : "Couldn't paste there — copied instead"}
+                {pasted ? (activeApp ? `Pasted to ${activeApp}` : 'Pasted') : "Couldn't paste there — copied instead"}
               </span>
             </motion.div>
           )}

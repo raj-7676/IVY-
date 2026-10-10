@@ -28,7 +28,6 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 arboard = "3"
-enigo = "0.2"
 chrono = "0.4"
 
 # Microphone capture and resampling (src/audio.rs), and the lite speech model through llama.cpp's
@@ -45,7 +44,7 @@ ureq = { version = "2", default-features = false, features = ["native-tls"] }
 native-tls = "0.2"
 sha2 = "0.10"
 
-# GPU backend per platform: Vulkan on Windows, Metal on macOS (Apple Silicon).
+# GPU backend per platform: Vulkan on Windows and Linux, Metal on macOS (Apple Silicon).
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
   "Win32_Foundation",
@@ -70,6 +69,14 @@ llama-cpp-2 = { version = "0.1.156", features = ["metal"] }
 llama-cpp-sys-2 = { version = "0.1.156", features = ["metal"] }
 # Objective-C messages for src/macos.rs; the same version Tauri's own macOS windowing already uses.
 objc2 = "0.6.4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+llama-cpp-2 = { version = "0.1.156", features = ["vulkan"] }
+llama-cpp-sys-2 = { version = "0.1.156", features = ["vulkan"] }
+# src/linux.rs: the X11 window in front, the keyboard state and XTest key presses (x11rb is already in the build
+# through arboard and global-hotkey); the capsule's GTK window (the version Tauri's Linux windowing uses).
+x11rb = { version = "0.13", features = ["xtest"] }
+gtk = "0.18"
 
 # Vendored copy of llama-cpp-sys-2 0.1.156 with one fix: llama.cpp avg-pools Voxtral's audio encoder output
 # (187 tokens per 30 s) but the real model does not (375). See "IVY PATCH" in

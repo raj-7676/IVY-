@@ -1,5 +1,5 @@
 import { DictationSession, SettingsConfig } from './types';
-import { IS_MAC } from './utils/platform';
+import { IS_LINUX, IS_MAC } from './utils/platform';
 
 // Ivy ships with no history. Everything on Home and in History is derived
 // from dictations the user actually made — there is deliberately no seeded
@@ -12,7 +12,8 @@ export const INITIAL_DICTATIONS: DictationSession[] = [];
 // The dictionary starts empty — those terms are the user's to teach — and
 // microphones are enumerated from the system at runtime, never hardcoded.
 export const INITIAL_SETTINGS: SettingsConfig = {
-  hotkey: 'Alt + Space',
+  // lib.rs DEFAULT_HOTKEY: Linux desktops use Alt + Space themselves.
+  hotkey: IS_LINUX ? 'Ctrl + Shift' : 'Alt + Space',
   activeTonePreset: 'Standard',
   // Same lists as the backend's defaults (lib.rs), shown only until the real settings load.
   presetApps: IS_MAC
@@ -20,6 +21,12 @@ export const INITIAL_SETTINGS: SettingsConfig = {
         Casual: ['WhatsApp.app', 'Discord.app', 'Telegram.app', 'Messages.app'],
         Standard: ['Visual Studio Code.app', 'Notion.app', 'Terminal.app'],
         Professional: ['Microsoft Outlook.app', 'Mail.app', 'Slack.app', 'Microsoft Teams.app', 'Microsoft Word.app'],
+      }
+    : IS_LINUX
+    ? {
+        Casual: ['discord', 'TelegramDesktop', 'Signal'],
+        Standard: ['Code', 'Gnome-terminal', 'konsole'],
+        Professional: ['thunderbird', 'Slack', 'teams-for-linux', 'libreoffice-writer'],
       }
     : {
         Casual: ['WhatsApp.exe', 'Discord.exe', 'Telegram.exe'],

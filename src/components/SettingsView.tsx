@@ -5,8 +5,9 @@ import { ChevronDown, Check, Cpu, Zap, Activity, RefreshCw } from 'lucide-react'
 import { SettingsConfig, HardwareMode, HardwareStatus } from '../types';
 import { ModeMatrix, modeCombo } from './ModeMatrix';
 import { useEscape } from '../utils/useEscape';
-import { IS_MAC, keyLabel } from '../utils/platform';
+import { IS_LINUX, IS_MAC, IS_WINDOWS, keyLabel, useDesktop } from '../utils/platform';
 import { PermissionRows, usePermissions } from './MacPermissions';
+import { LinuxKeyboardNotice } from './LinuxKeyboard';
 
 interface SettingsViewProps {
   settings: SettingsConfig;
@@ -55,6 +56,8 @@ const UpdatesControl: React.FC = () => {
         <span className="text-[12px] text-white/70">
           {IS_MAC
             ? `Downloading ${st.pct}%… Then drag Ivy into Applications in the window that opens.`
+            : IS_LINUX
+            ? `Downloading ${st.pct}%… Then your system asks for your password to install it, and Ivy restarts.`
             : `Downloading ${st.pct}%… Ivy restarts by itself.`}
         </span>
       )}
@@ -139,6 +142,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isRestarting, setIsRestarting] = useState(false);
   useEscape(micDropdownOpen, () => setMicDropdownOpen(false));
   const perms = usePermissions(IS_MAC);
+  const desktop = useDesktop();
+  // Linux on Wayland: no app may claim a key combination, so only Ctrl + Shift works and Alt + V doesn't exist.
+  const wayland = desktop?.wayland ?? false;
   useEscape(!!pendingModeSwitch && !isRestarting, () => setPendingModeSwitch(null));
   const [hardwareStatus, setHardwareStatus] = useState<HardwareStatus>({
     activeEngine: 'cpu',
@@ -255,6 +261,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     backgroundColor: 'rgba(255,255,255,0.05)',
     border: '1px solid rgba(255,255,255,0.09)',
   };
+  // Linux: no graphics card llama.cpp can use ("" from the backend), or one that failed Ivy's start-up check.
+  const noGpu = IS_LINUX && hardwareStatus.gpuName === '';
+  const gpuFailed =
+    IS_LINUX && !noGpu && hardwareStatus.configuredMode === 'gpu' && hardwareStatus.activeEngine === 'cpu' && !hardwareStatus.onBattery;
 
   return (
     <div id="screen-settings" className="flex-1 flex flex-col h-full overflow-y-auto">
@@ -270,6 +280,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <PermissionRows perms={perms} />
           </div>
         )}
+        <LinuxKeyboardNotice desktop={desktop} className="mb-6" />
         <div className="pb-2">
           <div className="text-[11px] uppercase tracking-wider text-white/30 mb-1">Appearance</div>
         </div>
@@ -285,7 +296,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             onChange={(v) => onUpdateSettings({ glassOpacity: v })}
           />
           {/* On/off, not a slider: Windows Acrylic has one fixed blur strength. Glass opacity above
-              sets how much of the blurred desktop shows through. */}
+              sets how much of the blurred desktop shows through. Linux desktops offer apps no blur. */}
+          {!IS_LINUX && (
           <Row
             title="Background blur"
             description="Frosted glass: the desktop behind Ivy shows through blurred. Lower Glass opacity to see more of it."
@@ -308,14 +320,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </button>
           </Row>
+          )}
         </div>
         <div className="divide-y divide-white/[0.06]">
           <Row
             title="Dictation shortcut"
-            description="Hold to record, let go to paste. Press twice quickly for hands-free, and once more to stop."
+            description={
+              wayland
+                ? 'Hold to record, let go to paste. Press twice quickly for hands-free, and once more to stop. On this desktop (Wayland) no app can take Alt + Space from the system, so the key is Ctrl + Shift.'
+                : 'Hold to record, let go to paste. Press twice quickly for hands-free, and once more to stop.'
+            }
           >
             <div className="flex items-center p-1 rounded-xl" style={chipStyle}>
-              {DICTATION_KEYS.map((key) => {
+              {DICTATION_KEYS.filter((key) => !wayland || key === 'Ctrl + Shift').map((key) => {
                 const picked = settings.hotkey === key;
                 return (
                   <button
@@ -336,7 +353,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             [
               ['Alt + V', 'Paste held-back text', `No text box when you finished speaking? Ivy keeps your words in its own clipboard (your normal clipboard is never touched). Click where you want them and press ${keyLabel('Alt + V')}.`],
             ] as const
-          ).map(([keys, title, description]) => (
+          ).filter(() => !wayland).map(([keys, title, description]) => (
             <Row key={keys} title={title} description={description}>
               <div className="flex items-center gap-1.5">
                 {keyLabel(keys).split(' + ').map((part) => (
@@ -466,6 +483,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <p className="text-[12px] text-white/40 mt-1 leading-relaxed max-w-md">
                   Where Ivy's model runs. GPU is fast on any graphics card (NVIDIA, AMD, Intel); CPU works on every PC, just slower.
                   {hardwareStatus.onBattery && ' Currently on battery, so dictation runs on CPU to save power regardless of the mode below.'}
+                  {noGpu && " Ivy found no graphics card it can use (it needs one with a Vulkan driver), so it runs on the CPU."}
+                  {gpuFailed && " Your graphics card gave wrong results in Ivy's start-up check, so this time the model runs on the CPU. Ivy checks again the next time it starts."}
                 </p>
               </div>
 
@@ -479,7 +498,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     ? 'cpu'
                     : (settings.hardwareMode || 'gpu');
                   const active = effectiveMode === mode;
-                  const isGpuOnBattery = hardwareStatus.onBattery && mode === 'gpu';
+                  const isGpuOnBattery = (hardwareStatus.onBattery || noGpu) && mode === 'gpu';
 
                   return (
                     <button
@@ -487,7 +506,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       disabled={isGpuOnBattery}
                       title={
                         isGpuOnBattery
-                          ? 'GPU acceleration paused while running on battery'
+                          ? noGpu
+                            ? 'No graphics card Ivy can use'
+                            : 'GPU acceleration paused while running on battery'
                           : undefined
                       }
                       onClick={() => {
@@ -523,12 +544,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <ModeMatrix hardwareMode={hardwareStatus.onBattery ? 'cpu' : (settings.hardwareMode || 'gpu')} />
             </div>
 
-            {/* Live GPU Telemetry pill */}
+            {/* Live GPU Telemetry pill (the load reading is Windows' own GPU counter; Linux shows the card only) */}
             <div className="mt-3 flex items-center justify-between px-3.5 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] text-[11.5px]">
               <div className="flex items-center gap-2 text-white/60 truncate">
                 <Activity className="w-3.5 h-3.5 text-white/40 shrink-0" />
-                <span className="truncate">{hardwareStatus.gpuName || 'System Graphics Adapter'}</span>
+                <span className="truncate">{hardwareStatus.gpuName || (IS_LINUX ? 'No graphics card found' : 'System Graphics Adapter')}</span>
               </div>
+              {IS_WINDOWS && (
               <div className="flex items-center gap-3 shrink-0">
                 <span className="text-white/40">Other apps' load:</span>
                 <span className="font-mono text-white/80 tabular-nums">
@@ -547,13 +569,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   />
                 </div>
               </div>
+              )}
             </div>
           </div>
 
           )}
 
-          {/* Smart VRAM Eviction */}
-          {!IS_MAC && (
+          {/* Smart VRAM Eviction (Windows only: it reads Windows' full-screen state and GPU counters) */}
+          {IS_WINDOWS && (
           <Row
             title="Smart GPU sharing (games, videos & 3D)"
             description={`While a game or full-screen video player is in front, Ivy sleeps: model unloaded, Alt+Space left to the game. Full-screen browsers and terminals don't count. When other programs keep the GPU at ${settings.vramEvictionThreshold}% or more, Ivy switches to CPU (a short note shows on the overlay) and returns to the GPU when it calms down.`}
@@ -587,7 +610,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {/* VRAM eviction threshold — was persisted, validated (50-100) and
               read by the backend's GPU monitor already, with no way to
               actually change it from its 90% default anywhere in this UI. */}
-          {!IS_MAC && settings.smartVramEviction && (
+          {IS_WINDOWS && settings.smartVramEviction && (
             <SliderRow
               title="GPU usage limit"
               value={settings.vramEvictionThreshold}
@@ -606,6 +629,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             description={
               IS_MAC
                 ? 'Run Ivy in the background as soon as you log in to your Mac — no window opens, only the menu bar icon and the hotkey are live. Open the app anytime from the menu bar or the Dock.'
+                : IS_LINUX
+                ? "Run Ivy in the background as soon as you log in — no window opens, only the hotkey and the tray icon (if your desktop shows tray icons) are live. Open Ivy from your apps menu anytime."
                 : 'Run Ivy in the background the moment you sign in to Windows — no window opens, only the tray icon and the hotkey are live. Open the app anytime from the tray.'
             }
           >

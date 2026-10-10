@@ -1,0 +1,13 @@
+#!/bin/sh
+# Gives Ivy's keyboard helper (/usr/libexec/ivy-keys) the one right it needs on Wayland desktops: the "input"
+# group, which may read the keyboards and, with 60-ivy-keys.rules, use the virtual keyboard device. Run as root by
+# the package's install scripts, and by Ivy's "Fix keyboard access" button (through pkexec).
+set -e
+helper=/usr/libexec/ivy-keys
+[ -f "$helper" ] || exit 0
+getent group input >/dev/null || groupadd --system input
+chown root:input "$helper"
+chmod 2755 "$helper"
+# The rule's permissions for /dev/uinput, now instead of at the next boot.
+udevadm control --reload-rules 2>/dev/null || true
+udevadm trigger --subsystem-match=misc --sysname-match=uinput 2>/dev/null || true

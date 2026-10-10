@@ -18,6 +18,8 @@ mod update;
 pub mod lite;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "linux")]
+mod linux;
 
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
@@ -250,6 +252,10 @@ fn default_manual_paste_hotkey() -> String {
     "Alt + V".to_string()
 }
 
+/// The dictation key a new install starts with. Linux: Ctrl + Shift, because Alt + Space opens the window menu on
+/// GNOME, Cinnamon and Xfce (KRunner on KDE), and on Wayland no app may take a key from the desktop at all.
+const DEFAULT_HOTKEY: &str = if cfg!(target_os = "linux") { "Ctrl + Shift" } else { "Alt + Space" };
+
 fn default_onboarding_completed() -> bool {
     false
 }
@@ -363,10 +369,10 @@ fn apply_snippets(text: &str, snippets: &[Snippet]) -> String {
 impl Default for SettingsConfig {
     fn default() -> Self {
         // Programs, picked by their .exe (Yash, 2026-10-06: names were confusing and often didn't match); on
-        // macOS by their .app bundle.
+        // macOS by their .app bundle, on Linux by their window class.
         let list = |apps: &[&str]| apps.iter().map(|a| a.to_string()).collect::<Vec<_>>();
         let mut preset_apps = HashMap::new();
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
         {
             preset_apps.insert("Casual".to_string(), list(&["WhatsApp.exe", "Discord.exe", "Telegram.exe"]));
             preset_apps.insert("Standard".to_string(), list(&["Code.exe", "Notion.exe", "WindowsTerminal.exe"]));
@@ -381,8 +387,14 @@ impl Default for SettingsConfig {
                 list(&["Microsoft Outlook.app", "Mail.app", "Slack.app", "Microsoft Teams.app", "Microsoft Word.app"]),
             );
         }
+        #[cfg(target_os = "linux")]
+        {
+            preset_apps.insert("Casual".to_string(), list(&["discord", "TelegramDesktop", "Signal"]));
+            preset_apps.insert("Standard".to_string(), list(&["Code", "Gnome-terminal", "konsole"]));
+            preset_apps.insert("Professional".to_string(), list(&["thunderbird", "Slack", "teams-for-linux", "libreoffice-writer"]));
+        }
         Self {
-            hotkey: "Alt + Space".to_string(),
+            hotkey: DEFAULT_HOTKEY.to_string(),
             active_tone_preset: "Standard".to_string(),
             preset_apps,
             personal_dictionary: vec![],
@@ -788,8 +800,9 @@ fn models_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
         return std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
     }
     // On macOS the app is a signed, read-only bundle (and may run from the disk image), so the downloaded model
-    // lives with Ivy's data in ~/Library/Application Support/app.ivy.dictation/models.
-    #[cfg(target_os = "macos")]
+    // lives with Ivy's data in ~/Library/Application Support/app.ivy.dictation/models. On Linux the package's
+    // files belong to root, so the same goes for ~/.local/share/app.ivy.dictation/models.
+    #[cfg(not(windows))]
     if let Ok(dir) = app.path().app_local_data_dir() {
         return dir.join("models");
     }
@@ -1124,23 +1137,38 @@ fn has_text_focus(pid: isize) -> bool {
     matches!(macos::focused_role(pid).as_deref(), Some("AXTextField" | "AXTextArea" | "AXComboBox"))
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+// Linux: the window in front is an X11 window id (src/linux.rs), or `linux::WAYLAND_APP` for an app on Wayland that
+// Ivy can't see. The same two labels as on Windows; an app Ivy can't see has no name (the capsule then says "Pasted").
+#[cfg(target_os = "linux")]
 fn foreground_app_label() -> String {
-    "Desktop".to_string()
+    match linux::foreground() {
+        linux::WAYLAND_APP => String::new(),
+        w => {
+            let name = linux::app_label(w);
+            if name.is_empty() { "Desktop".to_string() } else { name }
+        }
+    }
 }
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn foreground_tone_label() -> String {
-    "Desktop".to_string()
+    let title = linux::window_title(linux::foreground());
+    if title.trim().is_empty() { foreground_app_label() } else { title }
 }
-#[cfg(not(any(windows, target_os = "macos")))]
+/// The program in front as its window class names it, e.g. "Slack" ("" if unknown). Tone app lists match on this.
+#[cfg(target_os = "linux")]
 fn foreground_exe_name() -> String {
-    String::new()
+    linux::window_class(linux::foreground())
 }
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn capture_foreground_hwnd() -> isize {
-    0
+    linux::foreground()
 }
-#[cfg(not(windows))]
+// The desktop's icon window takes no typing, like Explorer's.
+#[cfg(target_os = "linux")]
+fn is_explorer_shell(hwnd: isize) -> bool {
+    linux::is_desktop(hwnd)
+}
+#[cfg(target_os = "macos")]
 fn is_explorer_shell(_hwnd: isize) -> bool {
     false
 }
@@ -1153,10 +1181,19 @@ fn own_window_ids(app: &tauri::AppHandle) -> (isize, isize) {
         let hwnd = |label: &str| app.get_webview_window(label).and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize).unwrap_or(0);
         (hwnd("capsule"), hwnd("main"))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
         let _ = app;
         let own = std::process::id() as isize;
+        (own, own)
+    }
+    // Linux: Tauri doesn't hand out X11 window ids, so the window in front is Ivy's when Ivy's process owns it (the
+    // capsule never takes focus, so that's the main window). -2 matches no window.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        let fg = linux::foreground();
+        let own = if linux::is_own(fg) { fg } else { -2 };
         (own, own)
     }
 }
@@ -1202,10 +1239,13 @@ fn describe_register_failure(spec: &str, e: impl std::fmt::Display) -> String {
     #[cfg(target_os = "macos")]
     let (taken, spec) = (msg.contains("RegisterEventHotKey failed"), spec.replace("Alt", "Option").replace("Ctrl", "Control"));
     if taken {
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
         let owner = "on this PC (another app or a Windows shortcut)";
         #[cfg(target_os = "macos")]
         let owner = "on this Mac (another app or a macOS shortcut)";
+        // Alt + Space is the window menu on GNOME, Cinnamon and Xfce, and KRunner on KDE.
+        #[cfg(target_os = "linux")]
+        let owner = "on this PC (another app, or your desktop's own shortcuts)";
         format!(
             "\"{spec}\" is already bound to something else {owner}. Pick a different key, or free this one up in that app's settings first."
         )
@@ -1289,6 +1329,9 @@ fn apply_hotkey_binding(
         }
         return Ok(());
     }
+    if !can_claim_keys() {
+        return Err(format!("On Wayland no app can take \"{new_spec}\" from your desktop. Ctrl + Shift works in every app."));
+    }
     let new_shortcut = parse_hotkey(new_spec).ok_or_else(|| format!("Couldn't understand the shortcut \"{new_spec}\""))?;
     app.global_shortcut()
         .register(new_shortcut)
@@ -1304,17 +1347,27 @@ fn apply_hotkey_binding(
     Ok(())
 }
 
+/// Whether Ivy may claim a key combination for itself (Alt + Space, Alt + V). Not on a Wayland desktop: there only
+/// Ctrl + Shift works, which ivy-keys watches without taking it from anyone (src/linux.rs).
+fn can_claim_keys() -> bool {
+    #[cfg(target_os = "linux")]
+    return !linux::is_wayland();
+    #[cfg(not(target_os = "linux"))]
+    true
+}
+
 /// The tone for a dictation (Yash, 2026-10-06): three modes. A program the user added to a mode's list
 /// always gets that mode; every other app gets the mode clicked on the Tone screen, at once. List entries
-/// ending in ".exe" (Windows) or ".app" (macOS) match the foreground program exactly; older name entries match
-/// the window title.
+/// ending in ".exe" (Windows) or ".app" (macOS), and every entry on Linux (a window class such as "Slack"), match
+/// the foreground program exactly; older name entries match the window title.
 fn tone_for_label(settings: &SettingsConfig, title: &str, exe: &str) -> String {
     let title = title.to_lowercase();
     for tone in ["Casual", "Professional", "Standard"] {
         if let Some(apps) = settings.preset_apps.get(tone) {
             let hit = apps.iter().any(|a| {
                 let a = a.trim().to_lowercase();
-                if a.ends_with(".exe") || a.ends_with(".app") { a.eq_ignore_ascii_case(exe) } else { !a.is_empty() && title.contains(&a) }
+                let program = cfg!(target_os = "linux") || a.ends_with(".exe") || a.ends_with(".app");
+                if program { !a.is_empty() && a.eq_ignore_ascii_case(exe) } else { !a.is_empty() && title.contains(&a) }
             });
             if hit {
                 return tone.to_string();
@@ -1586,41 +1639,54 @@ struct DictationComplete {
     // box found) — the capsule must say "Copied", never "Pasted", when this
     // is false. Meaningless when `success` is false.
     pasted: bool,
+    /// The capsule may offer Touch Up: a real paste into a window Ivy can check again. Only false after a paste
+    /// on Linux's Wayland into an app Ivy can't see.
+    touch_up: bool,
     text: String,
 }
 
-/// How the GPU is reached, for debug.log: llama.cpp's Vulkan backend on Windows, Metal on macOS.
+/// How the GPU is reached, for debug.log: llama.cpp's Vulkan backend on Windows and Linux, Metal on macOS.
 const GPU_BACKEND: &str = if cfg!(target_os = "macos") { "GPU (Metal)" } else { "GPU (Vulkan)" };
 
 /// Capsule note when macOS hasn't given Ivy the Accessibility permission that pasting needs.
 #[cfg(target_os = "macos")]
 const ACCESSIBILITY_NOTICE: &str = "Allow Ivy in System Settings › Accessibility to paste";
 
-/// macOS: set when the model gave garbage on the Mac's GPU in the once-per-run check (`metal_check`); Ivy then
-/// dictates on the chip's CPU cores until it restarts.
-#[cfg(target_os = "macos")]
-static METAL_BROKEN: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
-static METAL_CHECKED: AtomicBool = AtomicBool::new(false);
+/// Capsule note on a Wayland desktop while Ivy's keyboard helper doesn't work (src/linux.rs `Helper`).
+#[cfg(target_os = "linux")]
+const KEYBOARD_NOTICE: &str = "Ivy can't paste here yet · open Ivy to fix it";
 
-/// macOS: files for a crash during the GPU check. `metal-check.running` exists only while the check runs; found at
-/// the next start, Ivy died inside Metal, and `metal-disabled` (holding this build's id) keeps this build on the CPU
-/// instead of crashing again at every start. A newer build tries the GPU again.
+/// macOS and Linux: set when the model gave garbage on the GPU in the once-per-run check (`gpu_check`); Ivy then
+/// dictates on the CPU until it restarts.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+static GPU_BROKEN: AtomicBool = AtomicBool::new(false);
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+static GPU_CHECKED: AtomicBool = AtomicBool::new(false);
+
+/// The GPU check's two files (below) and the names its debug.log lines use.
 #[cfg(target_os = "macos")]
-fn metal_marker(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBuf> {
+const GPU_CHECK: [&str; 4] = ["metal-check.running", "metal-disabled", "Metal", "the Mac's GPU"];
+#[cfg(target_os = "linux")]
+const GPU_CHECK: [&str; 4] = ["gpu-check.running", "gpu-disabled", "Vulkan", "the GPU"];
+
+/// macOS and Linux: files for a crash during the GPU check. `GPU_CHECK[0]` exists only while the check runs; found at
+/// the next start, Ivy died inside the GPU driver, and `GPU_CHECK[1]` (holding this build's id) keeps this build on
+/// the CPU instead of crashing again at every start. A newer build tries the GPU again.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn gpu_marker(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBuf> {
     app.path().app_local_data_dir().ok().map(|dir| dir.join(name))
 }
 
 /// Which build this is: the version plus, for a build made on GitHub, its commit.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn build_id() -> String {
     format!("{}-{}", env!("CARGO_PKG_VERSION"), option_env!("GITHUB_SHA").unwrap_or("local"))
 }
 
-/// macOS, at start-up: a check that never finished means a crash inside Metal last time.
-#[cfg(target_os = "macos")]
-fn remember_metal_crash(app: &tauri::AppHandle) {
-    let (Some(running), Some(disabled)) = (metal_marker(app, "metal-check.running"), metal_marker(app, "metal-disabled")) else {
+/// At start-up: a check that never finished means a crash inside the GPU driver last time.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn remember_gpu_crash(app: &tauri::AppHandle) {
+    let (Some(running), Some(disabled)) = (gpu_marker(app, GPU_CHECK[0]), gpu_marker(app, GPU_CHECK[1])) else {
         return;
     };
     if running.exists() {
@@ -1628,17 +1694,18 @@ fn remember_metal_crash(app: &tauri::AppHandle) {
         let _ = fs::remove_file(&running);
     }
     if fs::read_to_string(&disabled).is_ok_and(|id| id == build_id()) {
-        METAL_BROKEN.store(true, Ordering::SeqCst);
-        METAL_CHECKED.store(true, Ordering::SeqCst);
+        GPU_BROKEN.store(true, Ordering::SeqCst);
+        GPU_CHECKED.store(true, Ordering::SeqCst);
         debug_log(app, "Ivy stopped during its last GPU check: this build dictates on the CPU");
     }
 }
 
-/// macOS: proof that the model computes correctly on this Mac's GPU, from a known clip (tests/fixtures/sample.wav,
-/// "The quick brown fox jumps over the lazy dog."). GitHub's virtual Macs (an Apple5-family virtual GPU, without
-/// the simdgroup operations of real Apple silicon) write "!!!!" there; the CPU writes the sentence.
-#[cfg(target_os = "macos")]
-fn metal_check(engine: &lite::LiteEngine) -> Result<(), String> {
+/// Proof that the model computes correctly on this GPU, from a known clip (tests/fixtures/sample.wav, "The quick
+/// brown fox jumps over the lazy dog."). GitHub's virtual Macs (an Apple5-family virtual GPU, without the simdgroup
+/// operations of real Apple silicon) write "!!!!" there; the CPU writes the sentence. Linux runs it too, for its
+/// many graphics drivers.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn gpu_check(engine: &lite::LiteEngine) -> Result<(), String> {
     const CLIP: &[u8] = include_bytes!("../tests/fixtures/sample.wav");
     let mut reader = hound::WavReader::new(std::io::Cursor::new(CLIP)).map_err(|e| e.to_string())?;
     let samples: Vec<f32> = reader.samples::<i16>().map(|s| s.unwrap_or(0) as f32 / i16::MAX as f32).collect();
@@ -1647,16 +1714,23 @@ fn metal_check(engine: &lite::LiteEngine) -> Result<(), String> {
     if heard.contains("fox") && heard.contains("dog") { Ok(()) } else { Err(format!("heard {text:?}")) }
 }
 
-/// A Mac has one chip: the model runs on its GPU through Metal, unless that GPU failed `metal_check`. No CPU mode,
+/// A Mac has one chip: the model runs on its GPU through Metal, unless that GPU failed `gpu_check`. No CPU mode,
 /// battery rule or GPU sharing there (Settings and the setup wizard show neither).
 #[cfg(target_os = "macos")]
 fn should_use_gpu(_app: &tauri::AppHandle) -> bool {
-    !METAL_BROKEN.load(Ordering::SeqCst)
+    !GPU_BROKEN.load(Ordering::SeqCst)
 }
 
 #[cfg(not(target_os = "macos"))]
 fn should_use_gpu(app: &tauri::AppHandle) -> bool {
     let settings = load_settings(app);
+
+    // Linux: no GPU llama.cpp can use (no Vulkan driver, or only software Vulkan in a virtual machine), or one that
+    // failed `gpu_check`: the CPU it is, whatever the mode says (Settings shows why).
+    #[cfg(target_os = "linux")]
+    if linux::gpu().is_none() || GPU_BROKEN.load(Ordering::SeqCst) {
+        return false;
+    }
 
     // Real, unconditional override: a laptop running on battery (AC
     // unplugged) always dictates on CPU, regardless of the configured
@@ -2294,7 +2368,7 @@ fn run_dictation_pipeline(
         audio::zeroize_samples(&mut samples);
         let _ = app.emit(
             "ivy://dictation-complete",
-            DictationComplete { success: false, reason: String::new(), active_app, session_id: String::new(), pasted: false, text: String::new() },
+            DictationComplete { success: false, reason: String::new(), active_app, session_id: String::new(), pasted: false, touch_up: false, text: String::new() },
         );
         return;
     }
@@ -2320,7 +2394,7 @@ fn run_dictation_pipeline(
         debug_log(&app, "wizard practice dictation: result sent to the wizard only (not pasted, not saved)");
         let _ = app.emit(
             "ivy://dictation-complete",
-            DictationComplete { success: !text.is_empty(), reason: String::new(), active_app, session_id: String::new(), pasted: false, text },
+            DictationComplete { success: !text.is_empty(), reason: String::new(), active_app, session_id: String::new(), pasted: false, touch_up: false, text },
         );
         return;
     }
@@ -2362,6 +2436,7 @@ fn run_dictation_pipeline(
                 active_app,
                 session_id: if audio_path.is_empty() { String::new() } else { id },
                 pasted: false,
+                touch_up: false,
                 text: String::new(),
             },
         );
@@ -2392,15 +2467,25 @@ fn run_dictation_pipeline(
     // what the user is actually waiting on. Runs on its own thread so a
     // slow/cold model load never delays `ivy://dictation-complete` either.
     spawn_title_generation(&app, id.clone(), text.clone());
+    // Touch Up swaps the text with Ctrl+Z, after checking the pasted-into window is still in front: an app on Wayland
+    // that Ivy can't see can't be checked, so it isn't offered there.
+    #[cfg(target_os = "linux")]
+    let touch_up = pasted && target_hwnd > 0;
+    #[cfg(not(target_os = "linux"))]
+    let touch_up = pasted;
     let _ = app.emit(
         "ivy://dictation-complete",
-        DictationComplete { success: true, reason: String::new(), active_app, session_id: id, pasted, text },
+        DictationComplete { success: true, reason: String::new(), active_app, session_id: id, pasted, touch_up, text },
     );
     // After the result, so the capsule ends on the reason rather than on "press Option + V" (which can't paste
     // without the permission either).
     #[cfg(target_os = "macos")]
     if !pasted && !macos::is_trusted() {
         let _ = app.emit("ivy://notice", ACCESSIBILITY_NOTICE);
+    }
+    #[cfg(target_os = "linux")]
+    if !pasted && target_hwnd == linux::WAYLAND_APP && !linux::keyboard_ready() {
+        let _ = app.emit("ivy://notice", KEYBOARD_NOTICE);
     }
 }
 
@@ -2601,8 +2686,10 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<bool, String
     // The Touch Up click made Ivy the active app: the app the text went to is brought back to the front first.
     #[cfg(target_os = "macos")]
     let same_window = macos::bring_to_front(target_hwnd as i32, std::time::Duration::from_millis(600), true);
-    #[cfg(not(any(windows, target_os = "macos")))]
-    let same_window = false;
+    // Linux: only an X11 window can be checked (a Wayland app reads as WAYLAND_APP, never offered Touch Up). The
+    // capsule never takes focus, so the click didn't move it.
+    #[cfg(target_os = "linux")]
+    let same_window = target_hwnd > 0 && linux::foreground() == target_hwnd;
     if !same_window {
         return Err("switched to a different window since the paste — can't safely swap the text there".into());
     }
@@ -2613,8 +2700,8 @@ fn touch_up_transcript(app: tauri::AppHandle, id: String) -> Result<bool, String
     let still_same_window = unsafe { GetForegroundWindow().0 as isize == target_hwnd };
     #[cfg(target_os = "macos")]
     let still_same_window = macos::frontmost_pid() as isize == target_hwnd;
-    #[cfg(not(any(windows, target_os = "macos")))]
-    let still_same_window = false;
+    #[cfg(target_os = "linux")]
+    let still_same_window = linux::foreground() == target_hwnd;
     if !still_same_window {
         return Err("switched to a different window while touching up — can't safely swap the text there".into());
     }
@@ -2710,20 +2797,22 @@ fn get_active_context(app: tauri::AppHandle) -> ActiveContext {
 /// Puts a transcript on the clipboard just long enough to paste it, marked so Windows keeps it out of
 /// clipboard history (Win+V), cloud clipboard sync and clipboard monitors: no copy outlives Ivy's history.
 /// On macOS it's marked concealed (nspasteboard.org), which clipboard managers such as Maccy and Raycast skip.
+/// On Linux it also goes on the selection (`linux::set_clipboard`).
 fn set_clipboard_private(text: &str) -> Result<(), arboard::Error> {
-    let mut clipboard = arboard::Clipboard::new()?;
     #[cfg(windows)]
     {
         use arboard::SetExtWindows;
+        let mut clipboard = arboard::Clipboard::new()?;
         clipboard.set().exclude_from_history().exclude_from_cloud().exclude_from_monitoring().text(text.to_string())
     }
     #[cfg(target_os = "macos")]
     {
         use arboard::SetExtApple;
+        let mut clipboard = arboard::Clipboard::new()?;
         clipboard.set().exclude_from_history().text(text.to_string())
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    clipboard.set_text(text.to_string())
+    #[cfg(target_os = "linux")]
+    linux::set_clipboard(text)
 }
 
 #[cfg(windows)]
@@ -2827,18 +2916,10 @@ fn send_ctrl_key(vk: u16) -> bool {
     macos::press_cmd(if vk == 0x5A { macos::KEY_Z } else { macos::KEY_V })
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+/// Linux: paste is Shift+Insert (terminals take it too), undo Ctrl+Z (`linux::press_paste`).
+#[cfg(target_os = "linux")]
 fn send_ctrl_key(vk: u16) -> bool {
-    let key = if vk == 0x5A { enigo::Key::Unicode('z') } else { enigo::Key::Unicode('v') };
-    match enigo::Enigo::new(&enigo::Settings::default()) {
-        Ok(mut enigo) => {
-            use enigo::{Direction::Click, Direction::Press, Direction::Release, Key, Keyboard};
-            let ok = enigo.key(Key::Control, Press).is_ok() && enigo.key(key, Click).is_ok();
-            let _ = enigo.key(Key::Control, Release);
-            ok
-        }
-        Err(_) => false,
-    }
+    if vk == 0x5A { linux::press_undo() } else { linux::press_paste() }
 }
 
 /// Waits for physical modifier keys to be released after a global shortcut press,
@@ -2892,8 +2973,10 @@ fn release_held_modifiers() {
     macos::wait_modifiers_released(std::time::Duration::from_millis(350));
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
-fn release_held_modifiers() {}
+#[cfg(target_os = "linux")]
+fn release_held_modifiers() {
+    linux::release_modifiers(std::time::Duration::from_millis(350));
+}
 
 // RegisterHotKey swallows our hotkey's Space/V/B, so the focused app sees Alt
 // pressed and released alone — which opens its menu (Win11 Notepad/Office show
@@ -2977,10 +3060,35 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
         *MANUAL_PASTE_TEXT.lock().unwrap_or_else(|e| e.into_inner()) = Some(text);
         return false;
     }
+    // Linux, the same rules for an X11 window: the one from hotkey-down must still be in front (polled 300 ms), and
+    // the desktop's icon window takes no paste. An app on Wayland (WAYLAND_APP) can't be checked: the paste goes
+    // ahead unless an X11 window (Ivy's own, say) came to the front since, and it needs ivy-keys working.
+    #[cfg(target_os = "linux")]
+    {
+        let regained = || {
+            (0..11).any(|i| {
+                if i > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                }
+                linux::foreground() == target
+            })
+        };
+        let can_paste = target != 0
+            && !is_explorer_shell(target)
+            && !linux::is_own(target)
+            && (target != linux::WAYLAND_APP || linux::keyboard_ready())
+            && regained();
+        if !can_paste {
+            *MANUAL_PASTE_TEXT.lock().unwrap_or_else(|e| e.into_inner()) = Some(text);
+            return false;
+        }
+    }
     // Read before overwriting — this is the one and only chance to know
     // what the clipboard held before Ivy clobbered it, needed to restore it
     // afterwards.
     let previous_clipboard = SavedClipboard::capture();
+    #[cfg(target_os = "linux")]
+    let selection = linux::save_selection();
     let expected_text = text.clone();
     // A target app can still swallow a Ctrl+V that SendInput reports as sent,
     // so Alt+V must always be able to re-paste the latest transcript.
@@ -3007,7 +3115,24 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
             return false;
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        release_held_modifiers();
+        if linux::foreground() != target {
+            previous_clipboard.restore();
+            selection.restore_if(&expected_text);
+            return false;
+        }
+    }
     let ok = send_ctrl_key(0x56);
+    // Linux: a paste key that couldn't be sent (ivy-keys gone) leaves the user's clipboard as it was.
+    // ponytail: Windows and macOS keep the transcript on the clipboard in this rare case; give them this too.
+    #[cfg(target_os = "linux")]
+    if !ok {
+        previous_clipboard.restore();
+        selection.restore_if(&expected_text);
+        return false;
+    }
     if ok {
         // A real keystroke paste just happened into `target` — record it for
         // Touch Up. Never set for the clipboard-only fallback above (early
@@ -3026,6 +3151,8 @@ fn paste_text(text: String, target: Option<isize>) -> bool {
         // another app copied something new in the meantime, leave it alone.
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(800));
+            #[cfg(target_os = "linux")]
+            selection.restore_if(&expected_text);
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                 if let Ok(curr) = clipboard.get_text() {
                     if curr == expected_text {
@@ -3110,8 +3237,27 @@ fn make_window_non_activating(window: &tauri::WebviewWindow) {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
-fn make_window_non_activating(_window: &tauri::WebviewWindow) {}
+/// Linux: the capsule as an override-redirect X11 window, the kind tooltips and menus are, which no window manager
+/// focuses, decorates or lists. GTK's accept-focus off (`focusable(false)`) isn't enough: WSLg's window manager still
+/// gave the capsule the focus when it appeared, and the paste then had no app to go to. Done on the main thread
+/// once the event loop runs (GTK's thread), long before the capsule is first shown.
+#[cfg(target_os = "linux")]
+fn make_window_non_activating(window: &tauri::WebviewWindow) {
+    let capsule = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use gtk::prelude::{GtkWindowExt, WidgetExt};
+        let Ok(w) = capsule.gtk_window() else { return };
+        // The see-through visual must be set before the window exists on the X server (realize).
+        if let Some(visual) = GtkWindowExt::screen(&w).and_then(|s| s.rgba_visual()) {
+            w.set_visual(Some(&visual));
+        }
+        w.realize();
+        match w.window() {
+            Some(gdk_window) => gdk_window.set_override_redirect(true),
+            None => log::error!("Capsule: no X11 window to make override-redirect"),
+        }
+    });
+}
 
 #[cfg(windows)]
 fn get_cursor_monitor(app: &tauri::AppHandle) -> Option<tauri::Monitor> {
@@ -3162,11 +3308,11 @@ fn position_capsule_window(app: &tauri::AppHandle) {
 
         if let Some(monitor) = get_cursor_monitor(app) {
             let scale = monitor.scale_factor();
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(windows)]
             let (mon_pos, mon_size) = (monitor.position(), monitor.size());
             // macOS: the work area starts below the menu bar (and a MacBook's camera notch), where the capsule
-            // must sit to be seen.
-            #[cfg(target_os = "macos")]
+            // must sit to be seen. Linux: below GNOME's top bar or a panel at the top.
+            #[cfg(not(windows))]
             let (mon_pos, mon_size) = (&monitor.work_area().position, &monitor.work_area().size);
 
             let mx = mon_pos.x as f64 / scale;
@@ -3201,6 +3347,10 @@ fn spawn_capsule_window(app: &tauri::AppHandle) {
     // while another app is active.
     #[cfg(target_os = "macos")]
     let builder = builder.focusable(false).accept_first_mouse(true);
+    // Linux: never takes focus (a click on Touch Up or X leaves the app in front where it was), and on every
+    // workspace, so it shows on the one in use.
+    #[cfg(target_os = "linux")]
+    let builder = builder.focusable(false).visible_on_all_workspaces(true);
     let built = builder.build();
 
     match built {
@@ -3302,29 +3452,31 @@ fn prewarm(app: &tauri::AppHandle) {
     std::thread::spawn(move || {
         let models = models_dir(&app);
         let prefer_gpu = should_use_gpu(&app);
-        // macOS: the first GPU load of this run is the check (`metal_check`), marked on disk until it's done.
-        #[cfg(target_os = "macos")]
-        let checking = prefer_gpu && !METAL_CHECKED.swap(true, Ordering::SeqCst);
-        #[cfg(target_os = "macos")]
-        let marker = metal_marker(&app, "metal-check.running").filter(|_| checking);
-        #[cfg(target_os = "macos")]
+        // macOS and Linux: the first GPU load of this run is the check (`gpu_check`), marked on disk until it's done.
+        // ponytail: a GPU load that skips the pre-warm (charger plugged in mid-run) isn't checked; check it there too
+        // if a Linux GPU ever passes at start and fails later.
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let checking = prefer_gpu && !GPU_CHECKED.swap(true, Ordering::SeqCst);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let marker = gpu_marker(&app, GPU_CHECK[0]).filter(|_| checking);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(m) = &marker {
             let _ = fs::write(m, build_id());
         }
         let t_warm = std::time::Instant::now();
         match lite::engine(&models, !prefer_gpu) {
             Ok(eng) => {
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
                 if checking {
-                    let result = metal_check(&eng);
+                    let result = gpu_check(&eng);
                     if let Some(m) = &marker {
                         let _ = fs::remove_file(m);
                     }
                     match result {
-                        Ok(()) => debug_log(&app, "Metal check passed: dictating on the Mac's GPU"),
+                        Ok(()) => debug_log(&app, &format!("{} check passed: dictating on {}", GPU_CHECK[2], GPU_CHECK[3])),
                         Err(why) => {
-                            METAL_BROKEN.store(true, Ordering::SeqCst);
-                            debug_log(&app, &format!("Metal check failed ({why}): dictating on the CPU until Ivy restarts"));
+                            GPU_BROKEN.store(true, Ordering::SeqCst);
+                            debug_log(&app, &format!("{} check failed ({why}): dictating on the CPU until Ivy restarts", GPU_CHECK[2]));
                             drop(eng);
                             lite::unload_engine();
                             prewarm(&app);
@@ -3337,7 +3489,7 @@ fn prewarm(app: &tauri::AppHandle) {
                 debug_log(&app, &format!("lite engine pre-warmed via {backend} in {}ms (incl. a silent warm-up pass)", t_warm.elapsed().as_millis()));
             }
             Err(e) => {
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
                 if let Some(m) = &marker {
                     let _ = fs::remove_file(m);
                 }
@@ -3440,6 +3592,7 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
                     active_app: ctx.active_app.clone(),
                     session_id: String::new(),
                     pasted: false,
+                    touch_up: false,
                     text: String::new(),
                 },
             );
@@ -3789,12 +3942,30 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
         );
         return;
     }
+    // Linux: Alt + V is only registered on X11 (`can_claim_keys`), so the target is an X11 window, checked the same
+    // way as on Windows.
+    #[cfg(target_os = "linux")]
+    if target <= 0 || target == capsule_hwnd || target == main_hwnd || is_explorer_shell(target) {
+        debug_log(app, &format!("manual-paste: invalid or desktop target window ({target})"));
+        position_capsule_window(app);
+        bridge_capsule_show(app, true);
+        let _ = app.emit(
+            "ivy://manual-paste",
+            ManualPastePayload {
+                pasted: false,
+                active_app: foreground_app_label(),
+            },
+        );
+        return;
+    }
 
     let active_app = foreground_app_label();
 
     // Read before overwriting — this is the one and only chance to know
     // what the clipboard held before Ivy temporarily swaps it out.
     let previous_clipboard = SavedClipboard::capture();
+    #[cfg(target_os = "linux")]
+    let selection = linux::save_selection();
     if arboard::Clipboard::new().is_ok() {
         if set_clipboard_private(&text).is_err() {
             debug_log(app, "manual-paste: couldn't access the clipboard");
@@ -3862,6 +4033,22 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
         );
         return;
     }
+    #[cfg(target_os = "linux")]
+    if linux::foreground() != target {
+        debug_log(app, "manual-paste: the window in front changed before the keystroke");
+        previous_clipboard.restore();
+        selection.restore_if(&text);
+        position_capsule_window(app);
+        bridge_capsule_show(app, true);
+        let _ = app.emit(
+            "ivy://manual-paste",
+            ManualPastePayload {
+                pasted: false,
+                active_app,
+            },
+        );
+        return;
+    }
 
     let sent = send_ctrl_key(0x56); // VK_V
 
@@ -3875,6 +4062,8 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
         let expected_text = text;
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(800));
+            #[cfg(target_os = "linux")]
+            selection.restore_if(&expected_text);
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                 if let Ok(curr) = clipboard.get_text() {
                     if curr == expected_text {
@@ -3887,6 +4076,13 @@ fn paste_manual_clipboard(app: &tauri::AppHandle) {
             }
             debug_log(&app_handle, "manual-paste: clipboard was modified or unavailable, skipped restore");
         });
+    } else {
+        // Linux: no key went out, so the user's clipboard goes straight back (see `paste_text`).
+        #[cfg(target_os = "linux")]
+        {
+            previous_clipboard.restore();
+            selection.restore_if(&text);
+        }
     }
 
     debug_log(app, &format!("manual-paste: sent Ctrl+V to target {target} ({sent})"));
@@ -3983,8 +4179,44 @@ async fn request_permission(kind: String) {
         "microphone" => macos::open_privacy_settings("Privacy_Microphone"),
         _ => {}
     }
-    #[cfg(not(target_os = "macos"))]
+    // Linux "keyboard": the Linux package's own fix for ivy-keys, run as root through the system's password prompt
+    // (pkexec), then the helper starts again.
+    #[cfg(target_os = "linux")]
+    if kind == "keyboard" {
+        let _ = tauri::async_runtime::spawn_blocking(linux::repair_helper).await;
+    }
+    #[cfg(windows)]
     let _ = kind;
+}
+
+/// Linux: what this desktop lets Ivy do, for Settings, the setup wizard and the capsule (src/utils/platform.ts).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Desktop {
+    /// A Wayland desktop (Ubuntu's and Fedora's default): Ivy sees only X11 apps there, and can't claim Alt + Space
+    /// or Alt + V.
+    wayland: bool,
+    /// Ivy's keyboard helper on Wayland (`linux::Helper`): "ready", "starting", "missing", "denied", "no-keyboard",
+    /// "no-paste". Always "ready" elsewhere.
+    keyboard: &'static str,
+}
+
+#[tauri::command]
+fn get_desktop() -> Desktop {
+    #[cfg(target_os = "linux")]
+    if linux::is_wayland() {
+        use linux::Helper;
+        let keyboard = match linux::helper() {
+            Helper::Ready { paste: true } => "ready",
+            Helper::Ready { paste: false } => "no-paste",
+            Helper::Off => "starting",
+            Helper::Missing => "missing",
+            Helper::Denied => "denied",
+            Helper::NoKeyboard => "no-keyboard",
+        };
+        return Desktop { wayland: true, keyboard };
+    }
+    Desktop { wayland: false, keyboard: "ready" }
 }
 
 /// Why the dictation shortcut isn't working (see `HOTKEY_PROBLEM`), or nothing.
@@ -3993,12 +4225,15 @@ fn get_hotkey_problem() -> Option<String> {
     HOTKEY_PROBLEM.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// macOS: the apps running now ("Notes.app"), for the Tone screen's "Add app". Windows picks an .exe instead.
+/// macOS: the apps running now ("Notes.app"); Linux: the apps with a window Ivy can see ("Slack"). For the Tone
+/// screen's "Add app". Windows picks an .exe instead.
 #[tauri::command]
 fn list_running_apps() -> Vec<String> {
     #[cfg(target_os = "macos")]
     let apps = macos::running_apps();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    let apps = linux::open_apps();
+    #[cfg(windows)]
     let apps = Vec::new();
     apps
 }
@@ -4034,8 +4269,11 @@ fn get_hardware_status(app: tauri::AppHandle) -> HardwareStatusDto {
     let on_battery = gpu_monitor::is_on_battery();
 
     #[cfg(target_os = "macos")]
-    let mac_engine = Some(if METAL_BROKEN.load(Ordering::SeqCst) { "cpu" } else { "gpu" });
-    #[cfg(not(target_os = "macos"))]
+    let mac_engine = Some(if GPU_BROKEN.load(Ordering::SeqCst) { "cpu" } else { "gpu" });
+    // Linux: no GPU llama.cpp can use, or one that failed the start-up check, means the CPU (Settings says which).
+    #[cfg(target_os = "linux")]
+    let mac_engine = (linux::gpu().is_none() || GPU_BROKEN.load(Ordering::SeqCst)).then_some("cpu");
+    #[cfg(windows)]
     let mac_engine: Option<&str> = None;
     let active_engine = if let Some(engine) = mac_engine {
         engine.to_string()
@@ -4159,6 +4397,7 @@ pub fn run() {
             update::install_update,
             get_permissions,
             request_permission,
+            get_desktop,
             list_running_apps,
             get_hotkey_problem,
         ])
@@ -4187,7 +4426,18 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 macos::disable_app_nap();
-                remember_metal_crash(&app.handle());
+                remember_gpu_crash(&app.handle());
+            }
+            #[cfg(target_os = "linux")]
+            {
+                linux::keep_clipboard();
+                remember_gpu_crash(&app.handle());
+                let log_app = app.handle().clone();
+                linux::start_helper(move |line| debug_log(&log_app, line));
+                // Finding the GPU starts Vulkan (a few hundred ms the first time): done here, off the window's thread.
+                std::thread::spawn(|| {
+                    let _ = linux::gpu();
+                });
             }
             let first_launch = !settings_path(&app.handle()).exists();
             // Real Windows Run-key launch, not a manual one — see the
@@ -4195,12 +4445,15 @@ pub fn run() {
             let launched_via_autostart = std::env::args().any(|a| a == "--autostart");
             let mut startup_settings = load_settings(&app.handle());
             // Anything else saved by an older version (e.g. a bare "Space" that would eat the spacebar) goes back
-            // to the default, and the fixed held-back paste key is restored.
+            // to the default, and the fixed held-back paste key is restored. On a Wayland desktop Alt + Space can't
+            // be had, so Ctrl + Shift takes over (a later X11 login keeps it; it works there too).
+            let claimable = can_claim_keys() || startup_settings.hotkey == modifier_hotkey::SPEC;
             if !DICTATION_KEYS.contains(&startup_settings.hotkey.as_str())
                 || startup_settings.manual_paste_hotkey != "Alt + V"
+                || !claimable
             {
-                if !DICTATION_KEYS.contains(&startup_settings.hotkey.as_str()) {
-                    startup_settings.hotkey = "Alt + Space".to_string();
+                if !DICTATION_KEYS.contains(&startup_settings.hotkey.as_str()) || !claimable {
+                    startup_settings.hotkey = if claimable { DEFAULT_HOTKEY } else { modifier_hotkey::SPEC }.to_string();
                 }
                 startup_settings.manual_paste_hotkey = "Alt + V".to_string();
                 let _ = write_settings_atomic(&app.handle(), &startup_settings);
@@ -4226,7 +4479,10 @@ pub fn run() {
             // incoming press against.
             let startup_manual_paste_hotkey = parse_hotkey(&startup_settings.manual_paste_hotkey)
                 .unwrap_or_else(|| Shortcut::new(Some(Modifiers::ALT), Code::KeyV));
-            if let Err(e) = app.global_shortcut().register(startup_manual_paste_hotkey) {
+            // Wayland: no Alt + V (Settings says so); registering it would only work while an X11 window is in front.
+            if !can_claim_keys() {
+                debug_log(&app.handle(), "Wayland desktop: dictation key Ctrl + Shift, no Alt + V");
+            } else if let Err(e) = app.global_shortcut().register(startup_manual_paste_hotkey) {
                 log::error!("Ivy: {} (manual paste) didn't register ({e}) — something else on this PC already has it.", startup_settings.manual_paste_hotkey);
             } else {
                 *MANUAL_PASTE_SHORTCUT.lock().unwrap_or_else(|e| e.into_inner()) = Some(startup_manual_paste_hotkey);
@@ -4425,15 +4681,21 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             match event {
                 tauri::RunEvent::Reopen { .. } => show_main_window(app.clone()),
-                // Quitting while the GPU check runs isn't a crash inside it (`remember_metal_crash`).
+                // Quitting while the GPU check runs isn't a crash inside it (`remember_gpu_crash`).
                 tauri::RunEvent::Exit => {
-                    if let Some(m) = metal_marker(app, "metal-check.running") {
+                    if let Some(m) = gpu_marker(app, GPU_CHECK[0]) {
                         let _ = fs::remove_file(m);
                     }
                 }
                 _ => {}
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "linux")]
+            if let tauri::RunEvent::Exit = event {
+                if let Some(m) = gpu_marker(app, GPU_CHECK[0]) {
+                    let _ = fs::remove_file(m);
+                }
+            }
+            #[cfg(windows)]
             let _ = (app, event);
         });
 }
@@ -4522,7 +4784,8 @@ mod tests {
         assert_eq!(tone_for_label(&settings, "WhatsApp", "WhatsApp.exe"), "Casual");
         // a title that merely mentions "brave" isn't brave.exe
         assert_eq!(tone_for_label(&settings, "brave new world.txt - Notepad", "notepad.exe"), "Standard");
-        // older name entries still match the title
+        // older name entries still match the title (Windows and macOS; Linux never had them)
+        #[cfg(not(target_os = "linux"))]
         assert_eq!(tone_for_label(&settings, "Inbox - Gmail - Google Chrome", "chrome.exe"), "Casual");
         // clicking a mode changes every app that isn't on a list, at once
         settings.active_tone_preset = "Professional".to_string();
@@ -4532,6 +4795,13 @@ mod tests {
         settings.preset_apps.insert("Casual".to_string(), vec!["Messages.app".to_string()]);
         assert_eq!(tone_for_label(&settings, "Messages", "Messages.app"), "Casual");
         assert_eq!(tone_for_label(&settings, "Messages.app tips - Safari", "Safari.app"), "Professional");
+        // Linux: an entry is a window class, matched exactly; a window title that mentions it doesn't count
+        #[cfg(target_os = "linux")]
+        {
+            settings.preset_apps.insert("Casual".to_string(), vec!["Slack".to_string()]);
+            assert_eq!(tone_for_label(&settings, "general - Acme - Slack", "Slack"), "Casual");
+            assert_eq!(tone_for_label(&settings, "slack-notes.txt - Mousepad", "Mousepad"), "Professional");
+        }
     }
 
     #[test]

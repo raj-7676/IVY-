@@ -1,0 +1,2 @@
+# Linux packaging scripts and the udev rule run on Linux: keep them LF even in a Windows checkout.
+src-tauri/linux/** text eol=lf

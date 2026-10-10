@@ -5,7 +5,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AlertTriangle, CheckCircle2, Download, RefreshCw, ShieldCheck, VolumeX, WifiOff, X } from 'lucide-react';
 import { IvyWordmark } from './IvyWordmark';
 import INTRO_VIDEO from '../assets/ivy-intro.mp4';
-import { IS_MAC, keyLabel } from '../utils/platform';
+import { IS_LINUX, IS_MAC, keyLabel } from '../utils/platform';
+import { INITIAL_SETTINGS } from '../defaults';
 
 // Ivy downloads its speech model itself on first start (src-tauri/src/model.rs); setup only copies it in for
 // an offline install. First start: a full screen (ModelDownloadScreen), then the setup wizard opens by itself
@@ -106,7 +107,7 @@ export const ModelDownloadBanner: React.FC<{ hotkey: string }> = ({ hotkey }) =>
       <Shell tone="ok">
         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
         <span className="text-white/90 font-semibold">Speech model ready.</span>
-        <span className="text-white/60">Hold {keyLabel(hotkey || 'Alt + Space')} anywhere and talk.</span>
+        <span className="text-white/60">Hold {keyLabel(hotkey || INITIAL_SETTINGS.hotkey)} anywhere and talk.</span>
       </Shell>
     );
   }
@@ -257,6 +258,8 @@ export const IntroFilm: React.FC<{
   const ready = status?.state === 'ready';
   return (
     <div className="fixed inset-0 z-[80] bg-black flex items-center justify-center select-none" onContextMenu={(e) => e.preventDefault()}>
+      {/* A system that can't decode the film (a Linux without an H.264 decoder for GStreamer) moves on rather
+          than holding a black screen that can't be skipped on first start. */}
       <video
         ref={ref}
         src={INTRO_VIDEO}
@@ -265,6 +268,7 @@ export const IntroFilm: React.FC<{
         disablePictureInPicture
         className="w-full h-full object-contain"
         onEnded={onDone}
+        onError={onDone}
       />
       {muted && (
         <button
@@ -392,7 +396,7 @@ export const ModelDownloadScreen: React.FC<{
         {!failed && !ready && (
           <p className="text-xs text-white/40 text-center max-w-md">
             Setup opens by itself when the download is done. You can close this window meanwhile: Ivy keeps
-            downloading from the {IS_MAC ? 'menu bar' : 'tray'} and comes back when it is ready.
+            downloading {IS_MAC ? 'from the menu bar' : IS_LINUX ? 'in the background' : 'from the tray'} and comes back when it is ready.
           </p>
         )}
       </div>

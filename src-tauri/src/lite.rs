@@ -461,7 +461,7 @@ mod tests {
         assert!(matches >= 57, "Expected at least 57/60 matches, got {matches}/{total}");
     }
 
-    /// The same speech gives the same text on every backend Ivy ships: Vulkan and CPU on Windows, Metal on a Mac
+    /// The same speech gives the same text on every backend Ivy ships: Vulkan and CPU on Windows and Linux, Metal on a Mac
     /// (IVY.md §19; a backend can hear differently, as llama.cpp's Voxtral pooling once did). The expected text
     /// is the Windows build's output. Needs the model files:
     /// `IVY_MODELS_DIR=<folder holding ivy-lite/> cargo test --lib model_matches_reference -- --ignored --nocapture`
@@ -478,8 +478,12 @@ mod tests {
         // virtual Macs have a paravirtual GPU of the Apple5 family, without the simdgroup operations every real
         // Apple-silicon GPU has (Apple7 and later), and llama.cpp's fallback kernels for it write "!!!!" (with or
         // without flash attention, 2026-10-10). The app checks for that itself and falls back to the CPU, lib.rs
-        // `metal_check`.
+        // `gpu_check`. Linux without a GPU (a CI runner): llama.cpp skips software Vulkan unless told
+        // GGML_VK_VISIBLE_DEVICES=0, which makes the "Vulkan" pass run on Mesa's llvmpipe, slowly but for real.
         let require_gpu = cfg!(not(target_os = "macos")) || std::env::var_os("IVY_REQUIRE_METAL").is_some();
+        for d in llama_cpp_2::list_llama_ggml_backend_devices() {
+            println!("device: {} {} ({:?}, {} MB)", d.backend, d.description, d.device_type, d.memory_total >> 20);
+        }
         for cpu in [false, true] {
             unload_engine();
             let t = Instant::now();

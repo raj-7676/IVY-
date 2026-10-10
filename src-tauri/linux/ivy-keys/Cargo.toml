@@ -1,0 +1,18 @@
+[package]
+name = "ivy-keys"
+version = "0.2.8"
+description = "Ivy's keyboard helper for Wayland desktops"
+authors = ["Yashvanraj"]
+license-file = "../../../LICENSE"
+edition = "2021"
+
+# Built on its own (not part of the app's build) and installed setgid "input" by the Linux packages
+# (src-tauri/linux/postinst.sh), so it has to stay this small: std and libc only.
+[workspace]
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = "s"
+strip = true

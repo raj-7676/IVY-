@@ -1,5 +1,6 @@
 import React from 'react';
 import { HardwareMode } from '../types';
+import { IS_WINDOWS } from '../utils/platform';
 
 interface ModeCombo {
   title: string;
@@ -14,7 +15,10 @@ const COMBOS: Record<HardwareMode, ModeCombo> = {
     points: [
       'Runs on your graphics card (NVIDIA, AMD or Intel, through Vulkan).',
       'A 1-minute dictation is ready in about 2 seconds; a short one in a fraction of a second.',
-      'On battery, or when other apps keep the GPU busy, Ivy switches to CPU by itself. During games and full-screen video it steps aside.',
+      // GPU sharing (busy GPU, full-screen apps) reads Windows' own counters (gpu_monitor.rs); the battery rule is everywhere.
+      IS_WINDOWS
+        ? 'On battery, or when other apps keep the GPU busy, Ivy switches to CPU by itself. During games and full-screen video it steps aside.'
+        : 'On battery, Ivy switches to CPU by itself.',
     ],
   },
   cpu: {

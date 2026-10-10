@@ -4,7 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { FloatingCapsule } from './components/FloatingCapsule';
 import { CapsuleMode, SettingsConfig, TonePreset } from './types';
 import { audioFeedback } from './services/audioFeedback';
-import { keyLabel } from './utils/platform';
+import { Desktop, keyLabel } from './utils/platform';
 
 // The always-on-top, system-wide overlay window. Every state transition is
 // driven by real events from the Rust backend — the real Alt+Space global
@@ -36,9 +36,10 @@ export default function CapsuleWindow() {
 
   useEffect(() => {
     const loadSettings = () => {
-      invoke<SettingsConfig>('get_settings')
-        .then((s) => {
-          setManualPasteHotkey(keyLabel(s.manualPasteHotkey));
+      // Linux's Wayland has no held-back paste key ("" makes the capsule point to History instead).
+      Promise.all([invoke<SettingsConfig>('get_settings'), invoke<Desktop>('get_desktop')])
+        .then(([s, desktop]) => {
+          setManualPasteHotkey(desktop.wayland ? '' : keyLabel(s.manualPasteHotkey));
         })
         .catch(() => {});
     };
@@ -112,6 +113,8 @@ export default function CapsuleWindow() {
       activeApp: string;
       sessionId: string;
       pasted: boolean;
+      /** False after a paste on Linux's Wayland into an app Ivy can't see: Touch Up couldn't check it's still there. */
+      touchUp: boolean;
     }>('ivy://dictation-complete', (e) => {
       setActiveApp(e.payload.activeApp);
       setSessionId(e.payload.sessionId);
@@ -131,7 +134,7 @@ export default function CapsuleWindow() {
       // never for the held-back-text case or a failed dictation. After the normal
       // "Pasted to X" confirmation window, the capsule shows the optional
       // button for a further 7s (Yash: time to let go of the hotkey and read it), then dismisses if unclicked.
-      if (e.payload.success && e.payload.pasted) {
+      if (e.payload.success && e.payload.pasted && e.payload.touchUp) {
         idleTimer.current = window.setTimeout(() => {
           setMode('touch-up');
           idleTimer.current = window.setTimeout(goIdle, 7000);

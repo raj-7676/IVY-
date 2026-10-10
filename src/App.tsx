@@ -17,8 +17,9 @@ import { IntroFilm, ModelDownloadBanner, ModelDownloadScreen, needsDownload, use
 import { INITIAL_DICTATIONS, INITIAL_SETTINGS } from './defaults';
 import { ScreenState, DictationSession, SettingsConfig, UserStats } from './types';
 import { Film, Minus, Square, X } from 'lucide-react';
-import { IS_MAC, keyLabel } from './utils/platform';
+import { IS_LINUX, IS_MAC, keyLabel, useDesktop } from './utils/platform';
 import { requestPermission, usePermissions } from './components/MacPermissions';
+import { LinuxKeyboardNotice } from './components/LinuxKeyboard';
 
 const ACCENT_RGB = '255, 107, 0';
 
@@ -180,9 +181,11 @@ export default function App() {
   }, []);
 
   // Real desktop blur comes from Windows (Acrylic), or on a Mac from its own dark glass material, kept on while Ivy
-  // isn't the active app; CSS backdrop-filter can't see behind the window.
+  // isn't the active app; CSS backdrop-filter can't see behind the window. Linux desktops offer apps no blur
+  // (Settings hides the switch there).
   const blurOn = settings.glassBlur > 0;
   useEffect(() => {
+    if (IS_LINUX) return;
     try {
       const win = getCurrentWindow();
       const effects = IS_MAC
@@ -197,6 +200,8 @@ export default function App() {
   // macOS: pasting needs the Accessibility permission, which every update asks for again (Ivy isn't signed
   // with an Apple certificate), so the main window says when it's missing.
   const perms = usePermissions(IS_MAC);
+  // Linux on Wayland: the same kind of banner when Ivy's keyboard helper doesn't work.
+  const desktop = useDesktop();
   const minimize = () => {
     window.dispatchEvent(new Event('ivy:window-hiding'));
     invoke('minimize_main');
@@ -308,7 +313,7 @@ export default function App() {
           <div className="hidden md:flex items-center gap-1.5 text-[11px] text-white/45">
             <span>Hold</span>
             <kbd className="px-1.5 py-0.5 rounded-md bg-white/[0.07] border border-white/[0.1] text-white/80 text-[10px]">
-              {keyLabel(settings.hotkey || 'Alt + Space')}
+              {keyLabel(settings.hotkey || INITIAL_SETTINGS.hotkey)}
             </kbd>
             <span>anywhere to dictate</span>
           </div>
@@ -358,6 +363,8 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {currentScreen !== 'first-run' && <LinuxKeyboardNotice desktop={desktop} className="relative z-10 mx-4 mt-2 shrink-0" />}
 
       {hotkeyProblem && (
         <div className="relative z-10 mx-4 mt-2 shrink-0 flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl text-xs font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25">
