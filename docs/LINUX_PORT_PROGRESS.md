@@ -182,6 +182,34 @@ Checked on Yash's PC, in WSL (Ubuntu 24.04):
   had crashed. Two exact replays later didn't repeat it. If the X connection ever fails, Ivy now writes "Ivy: the X
   server didn't answer the keyboard query" once to its log (`logs/Ivy.log`); look for it if Ctrl + Shift goes dead.
 
+### First real Linux PC (2026-10-10, evening)
+
+An Ubuntu 24.04.5 "Try Ubuntu" stick on Yash's laptop (Intel UHD + RTX 4060 Laptop, 144 Hz screen), **X11** session.
+This laptop's screen is wired to the NVIDIA chip (a MUX switch), so the whole desktop ran on the free nouveau/NVK
+driver through zink (`Xorg.0.log`: "glamor ... on zink ... NVK"). Claude ran the test there; full notes in the
+tester's `TEST_RESULTS.md`.
+- **Worked:** the `.deb` installs with ivy-keys `root:input` setgid; the model downloads and is checked; the Vulkan
+  check passes on the RTX 4060 (NVK); dictation types into apps; Alt + Space and Ctrl + Shift.
+- **"It doesn't hear me":** the PC's own fault. With headphones in, Ubuntu picked a "Headset Microphone" that didn't
+  exist, at +60 dB (debug.log `rms` near 1.0). Fixed in Settings → Sound (built-in mic). Now in §10 and the tester
+  guide.
+- **Fixed in code (this branch):**
+  - The intro film never played (window went full screen and straight back): WebKitGTK's video player can't open
+    `tauri://` (`FormatError`). It now plays from a blob URL on Linux (`ModelDownload.tsx`).
+  - "Audio saved safely" after a press with no talking: such presses are now "Didn't hear anything" and nothing is
+    saved (Linux only for now; Yash, 2026-10-10).
+  - Nothing ran smoothly. Measured cause: with `WEBKIT_DISABLE_DMABUF_RENDERER` WebKit has no compositing, so every
+    frame is repainted on one core. The drifting motes alone cost half a core; the intro ran at 50 fps with 34 ms
+    frames; each page's first visit froze 55-190 ms. Fixes behind `SOFTWARE_PAINT` (IVY.md §5/§19); measured after:
+    intro frames 18-20 ms, first visits 17 ms, Ivy in the background 0 CPU.
+  - The start-up pre-warm landed in the intro (the window takes ~1.9 s to appear); it now waits for `intro_done`.
+- **Tried and not adopted:** GPU drawing (`WEBKIT_DISABLE_DMABUF_RENDERER=0`) crashed nouveau's channel for WebKit
+  (`DEVICE LOST`); `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` with the Intel chip was smooth on a test page but added
+  0.5 s hitches to Ivy's intro on this laptop. Worth trying on ordinary Intel/AMD PCs and the proprietary NVIDIA
+  driver before deciding.
+- **Limit:** WebKitGTK's frame clock is a 60 Hz timer here (webkit://gpu "VBlank type: Timer"), so animations
+  can't follow a 144 Hz screen.
+
 ## 7. First things to check on a real Linux PC
 
 Easiest without one: an Ubuntu 24.04 "Try Ubuntu" USB stick (`docs/LINUX_TESTING.md`) on any PC, which gives real
@@ -204,11 +232,14 @@ hardware, a real GNOME Wayland desktop and the real GPU, with nothing installed 
 ```bash
 sudo apt install build-essential curl pkg-config libssl-dev cmake ninja-build \
   libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
-  libvulkan-dev glslc spirv-headers python3-evdev
+  libvulkan-dev glslc spirv-headers python3-evdev clang libclang-dev
+# clang: llama.cpp's Rust bindings fail with "'stdbool.h' file not found" without it.
 # Ubuntu 22.04 has no glslc package: leave it out above and use LunarG's Vulkan SDK (vulkan.lunarg.com), as CI does.
 curl https://sh.rustup.rs -sSf | sh          # Rust; Node 20 or newer from nodejs.org
 git clone -b linux-port https://github.com/raj-7676/IVY-.git ivy && cd ivy
 npm ci && npm run build                      # tauri-build needs dist/
+# package-lock.json from Windows can lack the bundler's Linux part ("Cannot find native binding"):
+#   npm i --no-save @rolldown/binding-linux-x64-gnu@"$(node -p "require('rolldown/package.json').version")"
 cd src-tauri && cargo test --lib -- --test-threads=1
 (cd linux/ivy-keys && cargo test && cargo build --release)
 sudo python3 linux/ivy-keys/check.py linux/ivy-keys/target/release/ivy-keys   # needs a free /dev/uinput
@@ -262,6 +293,9 @@ All in WSL (Ubuntu 24.04) on Yash's PC, with a copy of the worktree in `~/ivy` (
 - Shift+Insert is the paste key everywhere; an app that binds it to something else would do that instead.
 - Not done on Linux: ARM PCs, Flatpak, Snap or AppImage, the Wayland input-method protocol, the full-screen sleep
   and GPU-load rules, Caps Lock as a key.
+- Drawing: WebKitGTK runs without compositing (see §6, "First real Linux PC"), so animations cost CPU and top out
+  at 60 fps; keep new effects cheap on Linux (`SOFTWARE_PAINT`).
+- A mic that hears nothing is often the wrong input (a missing headset mic at full gain); see the tester guide.
 - Not verified on a real Linux PC yet: see §6.
 
 ## 11. When you change something

@@ -9,6 +9,13 @@ export const IS_LINUX = /Linux/.test(PLATFORM) && !/Android/.test(PLATFORM);
 export const IS_MAC = !IS_LINUX && /Mac/.test(PLATFORM);
 export const IS_WINDOWS = !IS_MAC && !IS_LINUX;
 
+/** Linux: WebKitGTK draws Ivy without compositing (main.rs sets WEBKIT_DISABLE_DMABUF_RENDERER, which leaves WebKit
+ *  no way to hand frames over, so it turns compositing off), so every frame that changes anything is repainted
+ *  from scratch on one core. Filters (blur, drop-shadow), masks and blend modes are then redrawn on every frame,
+ *  anything moving anywhere repaints the whole window, and a page's first paint is slow. Measured on a tester's
+ *  PC (2026-10-10): the launch intro at 50 fps with 34 ms frames, the drifting motes alone half a core. */
+export const SOFTWARE_PAINT = IS_LINUX;
+
 /** "PC" or "Mac", as in "Your voice stays on your PC." */
 export const DEVICE = IS_MAC ? 'Mac' : 'PC';
 

@@ -4,6 +4,8 @@ interface GlassParticlesProps {
   /** Accent as "r, g, b" — e.g. "255, 107, 0". */
   accentRgb: string;
   count?: number;
+  /** Stops the drift (the motes stay where they are) while nobody can see it move. */
+  paused?: boolean;
 }
 
 interface Particle {
@@ -23,8 +25,14 @@ interface Particle {
 
 // Drifting crystalline glass motes behind the app chrome — the ambient layer
 // that makes the window read as glass rather than a flat dark rectangle.
-export const GlassParticles: React.FC<GlassParticlesProps> = ({ accentRgb, count = 26 }) => {
+export const GlassParticles: React.FC<GlassParticlesProps> = ({ accentRgb, count = 26, paused = false }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pausedRef = useRef(paused);
+  const resumeRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    pausedRef.current = paused;
+    if (!paused) resumeRef.current();
+  }, [paused]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -58,10 +66,14 @@ export const GlassParticles: React.FC<GlassParticlesProps> = ({ accentRgb, count
       rotSpeed: (Math.random() - 0.5) * 0.02,
     }));
 
-    let animFrame: number;
+    let animFrame = 0;
     let lastTime = performance.now();
 
     const render = (time: number) => {
+      if (pausedRef.current) {
+        animFrame = 0;
+        return;
+      }
       const dt = Math.min(32, time - lastTime) / 16;
       lastTime = time;
       ctx.clearRect(0, 0, width, height);
@@ -130,8 +142,14 @@ export const GlassParticles: React.FC<GlassParticlesProps> = ({ accentRgb, count
       animFrame = requestAnimationFrame(render);
     };
 
+    resumeRef.current = () => {
+      if (animFrame) return;
+      lastTime = performance.now();
+      animFrame = requestAnimationFrame(render);
+    };
     animFrame = requestAnimationFrame(render);
     return () => {
+      resumeRef.current = () => undefined;
       cancelAnimationFrame(animFrame);
       resizeObserver.disconnect();
     };

@@ -198,6 +198,30 @@ export const IntroFilm: React.FC<{
   // effect below must not restart (it would leave and re-enter full screen each time).
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
+  // Linux: WebKitGTK's video player can't open Ivy's own tauri:// address (it reported FormatError, so the film
+  // closed the moment it opened, on a tester's PC, 2026-10-10), but it plays the same file from memory.
+  const [src, setSrc] = useState<string | undefined>(IS_LINUX ? undefined : INTRO_VIDEO);
+  const playRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    if (!IS_LINUX) return;
+    let url: string | undefined;
+    let gone = false;
+    fetch(INTRO_VIDEO)
+      .then((r) => r.blob())
+      .then((b) => {
+        if (gone) return;
+        url = URL.createObjectURL(b);
+        setSrc(url);
+      })
+      .catch(() => !gone && doneRef.current());
+    return () => {
+      gone = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, []);
+  useEffect(() => {
+    if (IS_LINUX && src) playRef.current();
+  }, [src]);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -213,9 +237,10 @@ export const IntroFilm: React.FC<{
         setMuted(true);
         return v.play().catch(() => undefined);
       });
+    playRef.current = play;
     onPlaying(true);
     win?.setFullscreen(true).catch(() => undefined);
-    play();
+    if (v.src) play();
     // Polled: a hidden WebView2 page gets no visibilitychange, which is how the first try kept playing in the tray.
     const check = async () => {
       if (stopped || !win) return;
@@ -262,7 +287,7 @@ export const IntroFilm: React.FC<{
           than holding a black screen that can't be skipped on first start. */}
       <video
         ref={ref}
-        src={INTRO_VIDEO}
+        src={src}
         playsInline
         preload="auto"
         disablePictureInPicture

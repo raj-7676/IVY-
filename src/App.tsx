@@ -17,11 +17,13 @@ import { IntroFilm, ModelDownloadBanner, ModelDownloadScreen, needsDownload, use
 import { INITIAL_DICTATIONS, INITIAL_SETTINGS } from './defaults';
 import { ScreenState, DictationSession, SettingsConfig, UserStats } from './types';
 import { Film, Minus, Square, X } from 'lucide-react';
-import { IS_LINUX, IS_MAC, keyLabel, useDesktop } from './utils/platform';
+import { IS_LINUX, IS_MAC, SOFTWARE_PAINT, keyLabel, useDesktop } from './utils/platform';
 import { requestPermission, usePermissions } from './components/MacPermissions';
 import { LinuxKeyboardNotice } from './components/LinuxKeyboard';
 
 const ACCENT_RGB = '255, 107, 0';
+/** Painted once before the intro on Linux (see `warmPages` in App). */
+const WARM_SCREENS: ScreenState[] = ['history', 'dictionary', 'tone', 'settings'];
 
 export default function App() {
   // 'wait' = intro not seen yet but the window isn't on screen: a startup (Run-key) launch loads this page
@@ -44,14 +46,37 @@ export default function App() {
       return;
     }
     let done = false;
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     let timer: number | undefined;
+    // Linux: a page's first paint is slow there (SOFTWARE_PAINT: 55-190 ms at each page's first visit after a
+    // start, a tester's PC, 2026-10-10), and the second is not. Painting each page once under this backdrop moves
+    // that wait to before the intro, where it reads as the black the intro starts from.
+    const warmPages = async () => {
+      if (screenRef.current !== 'home') return;
+      warmingRef.current = 'home';
+      const painted = () =>
+        new Promise<void>((r) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => r())), 0));
+      for (const screen of WARM_SCREENS) {
+        if (cancelled) break;
+        setCurrentScreen(screen);
+        await painted();
+      }
+      // Back to Home, or to where the tray asked for meanwhile.
+      setCurrentScreen(warmingRef.current ?? 'home');
+      warmingRef.current = null;
+      await painted();
+    };
     const start = () => {
       if (done) return;
       done = true;
       unlisten?.();
       window.clearInterval(timer);
-      setIntro('play');
+      if (!SOFTWARE_PAINT) {
+        setIntro('play');
+        return;
+      }
+      void warmPages().then(() => !cancelled && setIntro('play'));
     };
     // Polled too: opening Ivy while it already runs hidden (started with Windows) shows the window with
     // set_focus but no focus event reaches the page, which left it on this black backdrop for good (a
@@ -66,9 +91,29 @@ export default function App() {
       .catch(() => {});
     return () => {
       done = true;
+      cancelled = true;
       unlisten?.();
       window.clearInterval(timer);
     };
+  }, [intro]);
+
+  // Linux: the backdrop stays under the intro while the intro fades in (0.4 s, IvyLaunchIntro), so the app, already
+  // painted by `warmPages`, doesn't flash through first (seen in a screen recording, 2026-10-10).
+  const [introFadedIn, setIntroFadedIn] = useState(false);
+  useEffect(() => {
+    if (!IS_LINUX) return;
+    if (intro !== 'play') {
+      setIntroFadedIn(false);
+      return;
+    }
+    const t = window.setTimeout(() => setIntroFadedIn(true), 500);
+    return () => window.clearTimeout(t);
+  }, [intro]);
+
+  // Linux: the backend loads the speech model once the intro is over (lib.rs `intro_done`); loading it onto the
+  // graphics card during the intro froze the animation there.
+  useEffect(() => {
+    if (IS_LINUX && intro === 'off') invoke('intro_done').catch(() => {});
   }, [intro]);
 
   const handleIntroComplete = useCallback(() => {
@@ -81,6 +126,34 @@ export default function App() {
     const completed = typeof window !== 'undefined' && localStorage.getItem('ivy_onboarding_completed') === 'true';
     return completed ? 'home' : 'first-run';
   });
+  const screenRef = useRef(currentScreen);
+  screenRef.current = currentScreen;
+  /** While `warmPages` runs: the screen to show when it's done. */
+  const warmingRef = useRef<ScreenState | null>(null);
+  // Linux: the drifting motes repaint the whole window on every frame there (SOFTWARE_PAINT: half a core on a
+  // tester's PC), so they rest while nobody can watch them: Ivy in the background, or covered by the intro, the
+  // film or the download screen.
+  const [inFront, setInFront] = useState(() => typeof document === 'undefined' || document.hasFocus());
+  useEffect(() => {
+    if (!SOFTWARE_PAINT) return;
+    const front = () => setInFront(true);
+    const back = () => setInFront(false);
+    const visibility = () => setInFront(document.visibilityState === 'visible' && document.hasFocus());
+    const left = () => setInFront(document.hasFocus());
+    window.addEventListener('focus', front);
+    window.addEventListener('blur', back);
+    // The pointer over the window counts too, in case a focus event doesn't arrive.
+    document.addEventListener('pointerover', front);
+    document.documentElement.addEventListener('pointerleave', left);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      window.removeEventListener('focus', front);
+      window.removeEventListener('blur', back);
+      document.removeEventListener('pointerover', front);
+      document.documentElement.removeEventListener('pointerleave', left);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, []);
   // First start: the speech model downloads first, then the setup wizard opens by itself (Yash, 2026-10-08;
   // the backend brings the window back, lib.rs model_ready). Only when the backend says the model really is
   // missing (it checks the files before this page loads), so a model that is already here never shows the
@@ -164,6 +237,7 @@ export default function App() {
       // Real tray menu action ("Settings"), not just a UI nicety — the tray
       // is the only way to reach Ivy at all once the main window is closed.
       listen('ivy://open-settings', () => {
+        if (warmingRef.current) warmingRef.current = 'settings';
         setCurrentScreen('settings');
       })
         .then((f) => {
@@ -258,7 +332,9 @@ export default function App() {
       // No CSS border or rim shadows: Windows draws the window's own thin neutral border. The old orange
       // border and top highlight showed only on the top and left edges, which looked like a stray orange
       // line (Yash, 2026-10-07).
-      style={{ backgroundColor: `rgba(10, 8, 14, ${settings.glassOpacity / 100})` }}
+      // Linux: solid. Its desktops offer apps no blur, so a see-through window showed the windows behind it sharp,
+      // which read as a drawing fault (a tester's PC, 2026-10-10); Settings hides Appearance there.
+      style={{ backgroundColor: `rgba(10, 8, 14, ${IS_LINUX ? 1 : settings.glassOpacity / 100})` }}
       className="relative flex flex-col h-screen w-screen overflow-hidden antialiased select-none"
     >
       {/* Cinematic Launch Intro with smooth zoom-out-and-dock */}
@@ -267,6 +343,7 @@ export default function App() {
       )}
       {/* Same backdrop as the intro, so the app doesn't flash before it starts. */}
       {intro === 'wait' && <div className="fixed inset-0 z-50 bg-[#050508]" />}
+      {IS_LINUX && intro === 'play' && !introFadedIn && <div className="fixed inset-0 z-[49] bg-[#050508]" />}
 
       {/* Ambient warm wash + drifting glass motes */}
       <div
@@ -277,7 +354,10 @@ export default function App() {
                        radial-gradient(700px 600px at 6% 108%, rgba(${ACCENT_RGB}, 0.07), transparent 58%)`,
         }}
       />
-      <GlassParticles accentRgb={ACCENT_RGB} />
+      <GlassParticles
+        accentRgb={ACCENT_RGB}
+        paused={SOFTWARE_PAINT && (!inFront || intro !== 'off' || replayFilm || waitingForModel)}
+      />
 
       {/* Titlebar Header - on top (z-[100]) so window controls stay reachable, except during the launch intro,
           which has its own Skip and close buttons (two sets overlapped in the corner; Yash, 2026-10-08), and the

@@ -73,6 +73,11 @@ Write ✓ or ✗ next to each one, with a note when something looks wrong.
 
 ## 5. If something goes wrong
 
+**Ivy doesn't hear you** (every try says it didn't hear anything): check the microphone first. With headphones
+plugged in, Ubuntu sometimes switches to a "Headset Microphone" that your headphones don't have, at full volume, so
+Ivy only gets noise. Open **Settings → Sound → Input**, pick the built-in microphone (often "Internal Microphone"),
+set the volume to about a quarter, and try again.
+
 Send Yash a screenshot and Ivy's logs:
 
 - `~/.local/share/app.ivy.dictation/debug.log` (in Files, press Ctrl + H to show hidden folders). It records

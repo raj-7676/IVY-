@@ -1757,12 +1757,15 @@ fn should_use_gpu(app: &tauri::AppHandle) -> bool {
 /// Turns samples into final text: the lite engine (Qwen3-ASR-1.7B, fine-tuned by the lab; it resolves
 /// self-corrections itself), then the rulebooks for the chosen tone, then the personal dictionary. Shared by the
 /// fresh-dictation pipeline and `retry_transcription` so there's one real implementation, not two that could drift.
+/// Linux: `None` when nothing was said (no voice, or a short clip with no words in it), so there's nothing to keep
+/// or retry; `Some("")` for a longer recording the model came back empty on, worth keeping for a retry.
+/// Elsewhere every empty result is `Some("")`, kept for a retry as before.
 fn transcribe_and_clean(
     app: &tauri::AppHandle,
     models: &std::path::Path,
     samples: &[f32],
     tone_preset: &str,
-) -> String {
+) -> Option<String> {
     let prefer_gpu = should_use_gpu(app);
     // Quiet microphones: peak-normalise so soft voices reach the model at a usable level (audio::normalize_audio).
     // Both audio copies here are zeroed when this function returns (audio::Wiped).
@@ -1775,7 +1778,10 @@ fn transcribe_and_clean(
     drop(audio::Wiped(voiced_audio));
     if voice.voiced_secs < 0.25 {
         debug_log(app, &format!("no speech detected ({:.2}s voiced of {:.2}s) — nothing transcribed", voice.voiced_secs, voice.total_secs));
-        return String::new();
+        #[cfg(target_os = "linux")]
+        return None;
+        #[cfg(not(target_os = "linux"))]
+        return Some(String::new());
     }
 
     let settings = load_settings(app);
@@ -1811,14 +1817,29 @@ fn transcribe_and_clean(
     };
 
     // Hallucinations book, stage B: safety net against loops, impossible speaking rate
+    #[cfg(target_os = "linux")]
+    let total_secs = voice.total_secs;
     let raw = rulebooks::hallucinations::clean_asr_text(&raw, voice);
     if raw.is_empty() {
-        return raw;
+        // Linux: a short press with no words in it is a press without talking (room noise got past the voice check),
+        // not a failed transcription: "Didn't hear anything", nothing saved (a tester, 2026-10-10). Linux only until
+        // it's tried on Windows and a Mac.
+        #[cfg(target_os = "linux")]
+        if total_secs < NO_WORDS_SHORT_CLIP_SECS {
+            debug_log(app, &format!("no words in a {total_secs:.2}s recording — treated as nothing said"));
+            return None;
+        }
+        return Some(raw);
     }
     let formatted = rulebooks::after_model(&raw, rulebooks::Tone::from_label(tone_preset));
     // Snippets go last, so tone, formatting and the dictionary never touch the saved text.
-    apply_snippets(&apply_personal_dictionary(&formatted, &dictionary), &settings.snippets)
+    Some(apply_snippets(&apply_personal_dictionary(&formatted, &dictionary), &settings.snippets))
 }
+
+/// Linux: recordings shorter than this that the model finds no words in count as "nothing said"
+/// (`transcribe_and_clean`). Saying it again costs the user a few seconds; a longer one is kept in History for a retry.
+#[cfg(target_os = "linux")]
+const NO_WORDS_SHORT_CLIP_SECS: f32 = 3.0;
 
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
@@ -2380,7 +2401,7 @@ fn run_dictation_pipeline(
         return;
     }
 
-    let text = transcribe_and_clean(&app, &models, &samples, &tone_preset);
+    let heard = transcribe_and_clean(&app, &models, &samples, &tone_preset);
 
     if is_dictation_cancelled(dictation_id) {
         debug_log(&app, "pipeline aborted: dictation cancelled by user after transcription — discarding recording and history");
@@ -2388,6 +2409,17 @@ fn run_dictation_pipeline(
         audio::zeroize_samples(&mut samples);
         return;
     }
+
+    // Nothing said (Linux only, see `transcribe_and_clean`): the same "Didn't hear anything" as silence above, and
+    // nothing goes to History.
+    let Some(text) = heard else {
+        audio::zeroize_samples(&mut samples);
+        let _ = app.emit(
+            "ivy://dictation-complete",
+            DictationComplete { success: false, reason: String::new(), active_app, session_id: String::new(), pasted: false, touch_up: false, text: String::new() },
+        );
+        return;
+    };
 
     if for_wizard {
         audio::zeroize_samples(&mut samples);
@@ -2550,7 +2582,7 @@ fn retry_transcription(app: tauri::AppHandle, id: String, from_capsule: Option<b
         .collect();
 
     let models = models_dir(&app);
-    let text = transcribe_and_clean(&app, &models, &samples, &tone_preset);
+    let text = transcribe_and_clean(&app, &models, &samples, &tone_preset).unwrap_or_default();
     
     // In-memory audio sample zeroization for sensitive speech data
     audio::zeroize_samples(&mut samples);
@@ -3413,6 +3445,28 @@ fn set_wizard_active(app: tauri::AppHandle, active: bool) {
     WIZARD_ACTIVE.store(active, Ordering::SeqCst);
     if active {
         bridge_capsule_show(&app, false);
+    }
+}
+
+/// Linux: set once the page's launch intro is over (`intro_done`), for the start-up pre-warm to wait for.
+#[cfg(target_os = "linux")]
+static INTRO_OVER: (Mutex<bool>, std::sync::Condvar) = (Mutex::new(false), std::sync::Condvar::new());
+
+#[cfg(target_os = "linux")]
+fn wait_for_intro(limit: std::time::Duration) {
+    let (over, changed) = &INTRO_OVER;
+    let guard = over.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = changed.wait_timeout_while(guard, limit, |over| !*over);
+}
+
+/// The page's launch intro is over (Linux waits for it before loading the model; elsewhere nothing waits).
+#[tauri::command]
+fn intro_done() {
+    #[cfg(target_os = "linux")]
+    {
+        let (over, changed) = &INTRO_OVER;
+        *over.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        changed.notify_all();
     }
 }
 
@@ -4392,6 +4446,7 @@ pub fn run() {
             apply_hardware_mode,
             cancel_dictation,
             model_status,
+            intro_done,
             retry_model_download,
             update::check_for_update,
             update::install_update,
@@ -4635,6 +4690,12 @@ pub fn run() {
             let warm_app = app.handle().clone();
             std::thread::spawn(move || {
                 if model::is_ready() {
+                    // Linux: the window takes longer to come up there and paints its pages before the intro, so
+                    // 4 s still landed in the intro (frozen for 133-267 ms, a tester's PC, 2026-10-10); the page
+                    // says when the intro is over (`intro_done`), 15 s at most.
+                    #[cfg(target_os = "linux")]
+                    wait_for_intro(std::time::Duration::from_secs(15));
+                    #[cfg(not(target_os = "linux"))]
                     std::thread::sleep(std::time::Duration::from_secs(4));
                 }
                 model::ensure(&warm_app, model_dir, model_ready);

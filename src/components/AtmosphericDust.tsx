@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { SOFTWARE_PAINT } from '../utils/platform';
 
 interface Particle {
   x: number;
@@ -230,7 +231,9 @@ export const AtmosphericDust: React.FC = () => {
       id="atmospheric-dust-canvas"
       ref={canvasRef}
       className="fixed inset-0 pointer-events-none z-[60] opacity-85 transition-opacity duration-1000"
-      style={{ mixBlendMode: 'screen' }}
+      // Linux: a blend mode re-blends everything under the canvas on every frame there (SOFTWARE_PAINT); on the
+      // intro's near-black backdrop plain painting looks the same.
+      style={SOFTWARE_PAINT ? undefined : { mixBlendMode: 'screen' }}
       aria-hidden="true"
     />
   );

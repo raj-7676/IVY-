@@ -10,7 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { X } from 'lucide-react';
 import { soundEngine } from '../utils/audio';
 import { AtmosphericDust } from './AtmosphericDust';
-import { IS_MAC } from '../utils/platform';
+import { IS_MAC, SOFTWARE_PAINT } from '../utils/platform';
 
 interface IvyLaunchIntroProps {
   onComplete?: () => void;
@@ -461,8 +461,14 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
             linear-gradient(to bottom, rgba(255, 85, 0, 0.08) 1px, transparent 1px)
           `,
           backgroundSize: '48px 48px',
-          maskImage: 'radial-gradient(ellipse 65% 55% at 50% 50%, black 20%, transparent 80%)',
-          WebkitMaskImage: 'radial-gradient(ellipse 65% 55% at 50% 50%, black 20%, transparent 80%)',
+          // Linux: a mask is redrawn on every frame there (SOFTWARE_PAINT); at this opacity the grid is too faint
+          // to need the fade.
+          ...(SOFTWARE_PAINT
+            ? {}
+            : {
+                maskImage: 'radial-gradient(ellipse 65% 55% at 50% 50%, black 20%, transparent 80%)',
+                WebkitMaskImage: 'radial-gradient(ellipse 65% 55% at 50% 50%, black 20%, transparent 80%)',
+              }),
         }}
       />
 
@@ -484,10 +490,16 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
           <svg
             viewBox="0 0 800 260"
             className="w-[310px] xs:w-[380px] sm:w-[540px] md:w-[680px] lg:w-[780px] h-auto overflow-visible"
-            style={{
-              filter:
-                'drop-shadow(0 12px 28px rgba(0, 0, 0, 0.75)) drop-shadow(0 0 35px rgba(255, 85, 0, 0.28))',
-            }}
+            // Linux: the drop-shadows would re-blur the whole moving logo on every frame (SOFTWARE_PAINT); the
+            // `wordGlow` ellipse below paints the same warm halo as a plain gradient there.
+            style={
+              SOFTWARE_PAINT
+                ? undefined
+                : {
+                    filter:
+                      'drop-shadow(0 12px 28px rgba(0, 0, 0, 0.75)) drop-shadow(0 0 35px rgba(255, 85, 0, 0.28))',
+                  }
+            }
           >
             <defs>
               {/* Radial gradient for glowing keystone shard of 'V' */}
@@ -500,6 +512,13 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
               <radialGradient id="vCenterGlow" cx="50%" cy="50%" r="50%">
                 <stop offset="0%" stopColor="rgba(255, 120, 0, 0.45)" />
                 <stop offset="50%" stopColor="rgba(255, 85, 0, 0.15)" />
+                <stop offset="100%" stopColor="rgba(255, 85, 0, 0)" />
+              </radialGradient>
+
+              {/* Linux: the warm halo around the letters (see the svg's style) */}
+              <radialGradient id="wordGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="rgba(255, 85, 0, 0.32)" />
+                <stop offset="50%" stopColor="rgba(255, 85, 0, 0.20)" />
                 <stop offset="100%" stopColor="rgba(255, 85, 0, 0)" />
               </radialGradient>
 
@@ -523,6 +542,20 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
                 />
               </filter>
             </defs>
+
+            {/* Linux: the halo, brightening as the letters unfold */}
+            {SOFTWARE_PAINT && (
+              <motion.ellipse
+                cx="400"
+                cy="128"
+                rx="400"
+                ry="150"
+                fill="url(#wordGlow)"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: [0, 0.55, 1] }}
+                transition={{ times: [0, 0.3, 0.5], duration: durationSec, ease: 'easeOut' }}
+              />
+            )}
 
             {/* A. Resonance aura centered exactly on 'V' (400, 130) */}
             <motion.circle
@@ -592,7 +625,7 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
                   stroke={shard.stroke || 'rgba(255, 107, 0, 0.45)'}
                   strokeWidth="0.85"
                   strokeLinejoin="round"
-                  filter="url(#paperShadow)"
+                  filter={SOFTWARE_PAINT ? undefined : 'url(#paperShadow)'}
                   initial={{
                     x: shard.origamiOriginX,
                     y: shard.origamiOriginY,
@@ -625,7 +658,7 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
                 stroke={shard.stroke || 'rgba(255, 107, 0, 0.35)'}
                 strokeWidth="0.85"
                 strokeLinejoin="round"
-                filter="url(#paperShadow)"
+                filter={SOFTWARE_PAINT ? undefined : 'url(#paperShadow)'}
                 initial={{
                   x: shard.origamiOriginX,
                   y: shard.origamiOriginY,
@@ -657,7 +690,7 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
                 stroke={shard.stroke || 'rgba(255, 107, 0, 0.35)'}
                 strokeWidth="0.85"
                 strokeLinejoin="round"
-                filter="url(#paperShadow)"
+                filter={SOFTWARE_PAINT ? undefined : 'url(#paperShadow)'}
                 initial={{
                   x: shard.origamiOriginX,
                   y: shard.origamiOriginY,

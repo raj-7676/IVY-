@@ -281,6 +281,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         )}
         <LinuxKeyboardNotice desktop={desktop} className="mb-6" />
+        {/* Linux: no Appearance at all. Its desktops offer apps no blur, so Ivy's window is solid there (App.tsx);
+            a see-through one showed the windows behind it sharp. */}
+        {!IS_LINUX && (
+        <>
         <div className="pb-2">
           <div className="text-[11px] uppercase tracking-wider text-white/30 mb-1">Appearance</div>
         </div>
@@ -296,8 +300,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             onChange={(v) => onUpdateSettings({ glassOpacity: v })}
           />
           {/* On/off, not a slider: Windows Acrylic has one fixed blur strength. Glass opacity above
-              sets how much of the blurred desktop shows through. Linux desktops offer apps no blur. */}
-          {!IS_LINUX && (
+              sets how much of the blurred desktop shows through. */}
           <Row
             title="Background blur"
             description="Frosted glass: the desktop behind Ivy shows through blurred. Lower Glass opacity to see more of it."
@@ -320,8 +323,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </button>
           </Row>
-          )}
         </div>
+        </>
+        )}
         <div className="divide-y divide-white/[0.06]">
           <Row
             title="Dictation shortcut"
