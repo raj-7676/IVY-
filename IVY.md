@@ -8,7 +8,7 @@ A standalone, fully offline, source-available dictation app (MIT + Commons Claus
 |---|---|
 | Lives in | `Downloads/IVY_Transcriber` — standalone repo, no Friday/`jarvis_v2` code or dependency |
 | License | MIT + Commons Clause (free to use, not for sale); model: Apache 2.0 + Commons Clause |
-| Stack | Rust + Tauri v2 + React 19/TypeScript. Windows-first; macOS and Linux planned (§19) |
+| Stack | Rust + Tauri v2 + React 19/TypeScript. Windows-first; macOS and Linux ports on their own branches (§19) |
 | Speech & cleanup | Ivy lite: Qwen3-ASR-1.7B fine-tuned (Apache-2.0), one GGUF + mmproj, Vulkan GPU or CPU (§4) |
 | Formatting | 8 deterministic rulebooks (<1ms) across Casual, Standard, and Professional tones (§8) |
 | Network | None, ever — the model ships next to the installer and is copied in at install; zero runtime calls |
@@ -35,6 +35,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **Installer:** the release is a folder: setup exe + `ivy-lite-Q8_0.gguf` + `mmproj-ivy-lite-f16.gguf`; `hooks.nsh` copies the model in (§17).
 - **Test suite:** `cargo test --lib -- --test-threads=1` (see the verification table).
 - **macOS port** (2026-10-10, branch `macos-port`, worktree `D:\Dev\CODE\IVY_Transcriber-mac`): built and tested on GitHub's Apple Silicon runners, waiting for its first test on a real Mac (a friend's). What's done and the Mac traps: §19 and §5; the full handoff for the next session (for example Claude on the test Mac) is `docs/MAC_PORT_PROGRESS.md`. `main` stays the Windows release.
+- **Linux port** (2026-10-10, branch `linux-port` from `macos-port`, worktree `D:\Dev\CODE\IVY_Transcriber-linux`): `.deb` and `.rpm` for x86-64, built and tested on GitHub's Ubuntu 22.04 runners and in WSL on Yash's PC (an X11 desktop on Xvfb, the keyboard helper against the kernel's input layer). Waiting for a real Linux PC, above all a GNOME Wayland desktop. What's done and the Linux traps: §19 and §5; the handoff is `docs/LINUX_PORT_PROGRESS.md`, the tester guide `docs/LINUX_TESTING.md`.
 
 ---
 
@@ -105,12 +106,22 @@ Chat history does not persist between sessions. This file is the persistent memo
 **macOS** (src/macos.rs; details in §19)
 - **A click on the capsule makes Ivy the active app.** A Tauri window can't be a non-activating panel, so the capsule's Touch Up and Retry bring the target app back first (`macos::bring_to_front(.., reclaim: true)`), and its X gives the front back (`cancel_dictation`). Nothing else reclaims: History's Paste with Ivy's window in front stays "Copied", as on Windows. The plain hotkey path never clicks, so it never loses the target.
 - **GitHub's virtual Macs can't check Metal.** Their GPU is an "Apple Paravirtual device" of the Apple5 family: no simdgroup reduction or matrix multiply (every real Apple-silicon GPU is Apple7+), so llama.cpp runs fallback kernels that write "!!!!" (flash attention on or off). CI asserts the CPU path (exact reference text); a real Mac reports its Metal check in debug.log.
-- **A crash inside Metal must not crash Ivy at every start.** `metal-check.running` (in the data folder) exists only during the first GPU load and check; found at start-up, `metal-disabled` keeps that build on the CPU (`remember_metal_crash`).
+- **A crash inside Metal must not crash Ivy at every start.** `metal-check.running` (in the data folder) exists only during the first GPU load and check; found at start-up, `metal-disabled` keeps that build on the CPU (`remember_gpu_crash`, shared with Linux's Vulkan check).
 - **Never ask Ivy's own process for an accessibility attribute from the main thread:** Ivy would have to answer on that same blocked thread. `window_title` and `focused_role` skip Ivy's own pid.
 - **`NSWorkspace.frontmostApplication` only updates between main-loop turns.** The hotkey handler and sync commands run on the main thread, so `frontmost_pid` asks the accessibility system instead whenever Ivy has the permission (pasting needs it anyway).
 - **Without Accessibility, macOS drops a posted Cmd+V silently.** Ivy checks `AXIsProcessTrusted` before every paste and says so on the capsule instead of claiming "Pasted".
 - **Ivy is ad-hoc signed (no $99 Apple account, Yash 2026-10-10), so each update is a new app to macOS's permission system.** Accessibility shows as on but doesn't work until the user switches Ivy off and on in System Settings; the main window's banner and Settings say so.
 - **AppKit calls on windows must run on the main thread** (`run_on_main_thread` in `bridge_capsule_show`).
+
+**Linux** (src/linux.rs, src-tauri/linux/; details in §19)
+- **Wayland lets no app see the window in front, read keys, press keys or place a window.** Ivy runs on XWayland (`GDK_BACKEND=x11`, main.rs), sees and types into X11 windows only, and leaves the keyboard to ivy-keys. A native Wayland app in front is `WAYLAND_APP` (-1): never named, matched or offered Touch Up, but pasted into.
+- **arboard empties its clipboard when its last handle closes** (it hands the text to a clipboard manager, which a default GNOME doesn't run). One handle lives for the whole run (`linux::keep_clipboard`), or every pasted transcript would vanish from the clipboard before the app read it.
+- **Ctrl+V types ^V in a terminal.** Linux's paste is Shift+Insert, and the text goes on both the clipboard and the selection (xterm, kitty and Konsole paste the selection); both are restored.
+- **`focusable(false)` doesn't keep the capsule from taking focus.** It's an override-redirect X11 window (`make_window_non_activating`), which no window manager focuses. WSLg's window manager focuses even those, so focus can't be judged in WSLg: test on Xvfb + Openbox.
+- **ivy-keys is setgid `input`, and any program may run it.** It never takes a path, option or variable from its caller, tells other keys only while Ctrl and Shift are both held, and serves only the seat's active user (logind). Keep it that narrow.
+- **ivy-keys must scan the keyboards before creating its virtual keyboard:** that device's node belongs to root for a moment, which read as "denied". It skips its own device by name, or its Shift+Insert would read as the user's Shift.
+- **llama.cpp's Vulkan skips software Vulkan (llvmpipe)** unless `GGML_VK_VISIBLE_DEVICES=0`. CI sets it to test Vulkan on GPU-less runners; on a user's PC llvmpipe means the CPU (`linux::gpu`).
+- **Packaging:** `beforeBundleCommand.cwd` is relative to `src-tauri`. Tauri adds the deb's appindicator dependency itself (listing it again duplicated it). Windows git records no executable bits, so `src-tauri/linux` scripts are marked with `git update-index --chmod=+x` and postinst chmods the setup script anyway; `.gitattributes` keeps them LF.
 
 **Rendering, platform and build**
 - **Outset `box-shadow` on a transparent DirectComposition surface renders as a hard rectangle** (Skia premultiplication). Use a solid fill, an inset highlight and a 1px border instead.
@@ -267,9 +278,17 @@ Measured on Yash's RTX 4060 laptop GPU and Intel Core i7 (§23):
 - **Build:** `.github/workflows/macos.yml` on `macos-14` runs the unit tests, builds the DMG (ad-hoc signed), and checks the model on Metal against the Windows text (`model_matches_reference`). Local type-check for the Mac target is possible on Windows with stub crates for llama.cpp and objc2's exception helper (`cargo check --target aarch64-apple-darwin`).
 - **Not on a Mac (yet):** Intel Macs, notarization, full-screen sleep and GPU load rules, Caps Lock key.
 
-- **Linux X11:** `XGrabKey`, `_NET_ACTIVE_WINDOW`, `XTestFakeKeyEvent`, draining modifiers via `XQueryKeymap`.
-- **Linux Wayland:** needs the input-method protocol (`zwp_input_method_v2::commit_string`).
-- **Windows-only code to port:** DXGI telemetry, `SendInput`, power status, the Alt-menu mask.
+**Linux** (branch `linux-port`, built 2026-10-10; x86-64, Ubuntu 22.04+, Debian 12, Mint 21+, Fedora 37+). Everything Linux-only lives in `src/linux.rs` and `src-tauri/linux/`, called from `#[cfg(target_os = "linux")]` branches in `lib.rs`; the frontend asks `src/utils/platform.ts` (`IS_LINUX`, `useDesktop`). Two kinds of desktop:
+- **X11** (Mint, "Ubuntu on Xorg"): like Windows. Window in front from `_NET_ACTIVE_WINDOW`, its program from `WM_CLASS` (Tone app lists hold classes such as "Slack"), Ivy's own windows by `_NET_WM_PID`, the desktop window (`_NET_WM_WINDOW_TYPE_DESKTOP`) takes no paste. Keyboard state from `QueryKeymap`, key presses through XTest, Alt + Space and Alt + V as key grabs.
+- **Wayland** (Ubuntu's and Fedora's default): Ivy's windows are X11 windows on XWayland; only X11 apps can be seen and typed into directly. For everything else, **ivy-keys**: a small helper (`/usr/libexec/ivy-keys`, setgid `input`, plus `60-ivy-keys.rules` for `/dev/uinput`; the ydotool/keyd pattern) that reads the keyboards' state (`EVIOCGKEY`) and presses Shift+Insert through a two-key virtual keyboard. Only Ctrl + Shift exists there (a saved Alt + Space switches to it), no Alt + V, Touch Up only after a paste into an X11 window. The helper's state shows in a banner with "Fix keyboard access" (pkexec `ivy-keys-setup`).
+- **Default key:** Ctrl + Shift (Alt + Space is the window menu on GNOME, Cinnamon and Xfce, and KRunner on KDE).
+- **Paste:** Shift+Insert (terminals take it); the text on the clipboard and the selection, both restored after 800 ms.
+- **Capsule:** override-redirect X11 window, in the work area, on every workspace.
+- **GPU:** llama.cpp's Vulkan; the first GPU load of each run is checked on a known clip (`gpu_check`, the Mac's Metal check generalized) with the same crash markers (`gpu-check.running`, `gpu-disabled`). No usable GPU (or only llvmpipe) means the CPU, and Settings says so. Battery rule from `/sys/class/power_supply`; no full-screen or GPU-load rules (Windows counters).
+- **Model files** download to `~/.local/share/app.ivy.dictation/models`.
+- **Updates:** the release's `.deb` or `.rpm` (whichever owns Ivy, `rpm -qf`), checked against SHA256SUMS.txt, installed through pkexec, then Ivy restarts.
+- **Build:** `.github/workflows/linux.yml` on `ubuntu-22.04` runs the unit tests and the helper's tests, builds both packages, and checks the model on the CPU and on Vulkan (llvmpipe) against the Windows text. `src-tauri/linux/ivy-keys/check.py` tests the helper against the kernel's real input layer.
+- **Not on Linux (yet):** ARM, Flatpak/Snap/AppImage, the Wayland input-method protocol, Caps Lock key. Not yet run on a real Linux PC: a real Wayland session, a real GPU, tray, autostart, updater.
 
 ## 20. Open items
 
@@ -278,6 +297,7 @@ Measured on Yash's RTX 4060 laptop GPU and Intel Core i7 (§23):
 - **Personal Dictionary for accent mishears** (place names like Gachibowli): supported in the lite prompt (`Words that may appear: ...`).
 - **Mic start-up clips ~650ms of every dictation** on Yash's Realtek (§5), measured with `live_mic_capture`: `Recorder::start` takes 200–285ms to open the stream, then the driver sends zeros for a steady ~425ms. Remaining option is keeping the stream open while Ivy runs (mic-in-use indicator stays lit). Yash said 400ms is acceptable if it can't be reduced (2026-09-28).
 - **macOS** (§19): first real-Mac test pending (Yash's friend, Apple Silicon). Free ad-hoc signing for now (Yash, 2026-10-10): first launch needs "Open Anyway" in System Settings › Privacy & Security, and every update needs Accessibility switched off and on again.
+- **Linux** (§19): first real-PC test pending, above all GNOME on Wayland (ivy-keys on real keyboards, pasting into Wayland apps, the capsule over them) and a real GPU through Vulkan. An Ubuntu "Try Ubuntu" USB stick on any PC is enough (`docs/LINUX_TESTING.md`).
 
 ## 21. Standing lessons
 
@@ -310,6 +330,7 @@ Measured on Yash's RTX 4060 laptop GPU and Intel Core i7 (§23):
 | 2026-10-03 (Task 2) | **70 passed, 0 failed, 2 ignored** | Voxtral Mini 3B multimodal engine verified (60 golden clips: 98.3% match). Qwen removed. Benchmarks measured. Cold build, tsc clean, deployed to both exe paths. |
 | 2026-10-03 (fixes) | **70 passed, 0 failed, 1 ignored** | Patched llama.cpp avgpool bug (vendored `llama-cpp-sys-2`), exact training prompt, long-audio split, length-scaled timeout, single BOS, UTF-8 decode, real benchmark numbers. Golden 59/60 vs regenerated `expected`. Release build, tsc clean. |
 | 2026-10-10 (macOS port) | **70 passed, 0 failed, 2 ignored** on Windows; **69 passed, 0 failed, 2 ignored** on GitHub `macos-14` | `model_matches_reference`: Windows Vulkan and CPU, and the Mac CPU, write the reference text for both fixture clips; the virtual Mac GPU (Apple5, no simdgroup ops) writes "!!!!", so it can't check Metal. DMG (a339900) verified from Windows: arm64, Info.plist mic text and macOS 13, ad-hoc + hardened runtime + audio-input entitlement. tsc clean. Not yet run on a real Mac. |
+| 2026-10-10 (Linux port) | **70 passed, 0 failed, 2 ignored** on Windows; **69 passed, 0 failed, 2 ignored** on Linux (WSL Ubuntu 24.04) | ivy-keys: its unit test and `check.py` against the kernel's input layer PASS. Installed `.deb` on an X11 desktop (Xvfb + Openbox): dictation pasted with the clipboard restored, Alt + V, Touch Up, the Alt + Space conflict banner. Wayland screens in WSLg. tsc clean. Not yet run on a real Linux PC. |
 | 2026-10-06 (lite-only) | **61 passed, 0 failed, 1 ignored** (57 CPU + 4 lite GPU: golden 60/60, quiet mic 4/5, benchmark) | Antigravity Tasks 5-7 verified (lite golden 60/60, quiet mic 4/5). Voxtral, Whisper, Speed/Accuracy and Summarize removed; tone rulebooks, spell-check Touch Up, lakhs/crores rule, split-release installer. tsc clean. |
 
 ---
