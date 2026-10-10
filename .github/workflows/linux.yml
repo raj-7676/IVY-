@@ -1,7 +1,7 @@
 name: Linux Build
 
 # Builds, tests and packages Ivy on Linux (branch linux-port), and checks that the speech model hears the same on
-# Linux as on Windows: on the CPU, and on Vulkan through Mesa's software driver (the runners have no GPU).
+# Linux as on Windows. The runners have no GPU, so that check runs on the CPU, the way Ivy runs on a PC without one.
 on:
   push:
     branches: [ "linux-port" ]
@@ -104,7 +104,8 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      # mesa-vulkan-drivers: llvmpipe, Mesa's Vulkan on the CPU, standing in for a GPU.
+      # mesa-vulkan-drivers: Mesa's software Vulkan (llvmpipe), as on a PC or virtual machine without a GPU. llama.cpp
+      # leaves it out by itself, so Ivy uses the CPU: the same path a user without a GPU takes.
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
@@ -139,10 +140,10 @@ jobs:
             da50c4dcfc9bb36baeca3a5dedb742988dbe1058ab282dbb62d8a31be27795ed ivy-lite-Q8_0.gguf \
             | sha256sum -c -
 
-      # GGML_VK_VISIBLE_DEVICES=0: llama.cpp skips software Vulkan unless told to use it.
-      - name: Transcribe Test Clips on CPU and Vulkan
+      # Not forced onto llvmpipe (GGML_VK_VISIBLE_DEVICES): it emulates a GPU on the CPU, too slowly for a whole model
+      # (more than 120 s for one 3 s clip), and llama.cpp's own CI runs only small operation tests there.
+      - name: Transcribe Test Clips
         working-directory: src-tauri
         env:
           IVY_MODELS_DIR: ${{ runner.temp }}/models
-          GGML_VK_VISIBLE_DEVICES: "0"
         run: cargo test --release --lib model_matches_reference -- --ignored --nocapture

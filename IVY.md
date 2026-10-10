@@ -120,7 +120,7 @@ Chat history does not persist between sessions. This file is the persistent memo
 - **`focusable(false)` doesn't keep the capsule from taking focus.** It's an override-redirect X11 window (`make_window_non_activating`), which no window manager focuses. WSLg's window manager focuses even those, so focus can't be judged in WSLg: test on Xvfb + Openbox.
 - **ivy-keys is setgid `input`, and any program may run it.** It never takes a path, option or variable from its caller, tells other keys only while Ctrl and Shift are both held, and serves only the seat's active user (logind). Keep it that narrow.
 - **ivy-keys must scan the keyboards before creating its virtual keyboard:** that device's node belongs to root for a moment, which read as "denied". It skips its own device by name, or its Shift+Insert would read as the user's Shift.
-- **llama.cpp's Vulkan skips software Vulkan (llvmpipe)** unless `GGML_VK_VISIBLE_DEVICES=0`. CI sets it to test Vulkan on GPU-less runners; on a user's PC llvmpipe means the CPU (`linux::gpu`).
+- **llama.cpp's Vulkan skips software Vulkan (llvmpipe)** unless `GGML_VK_VISIBLE_DEVICES` forces it; on a user's PC llvmpipe means the CPU (`linux::gpu`). Never force it in CI for a model check: llvmpipe emulates a GPU on the CPU, and one 3 s clip took over 120 s on GitHub (2026-10-10). llama.cpp's own CI runs only small operation tests on it.
 - **Packaging:** `beforeBundleCommand.cwd` is relative to `src-tauri`. Tauri adds the deb's appindicator dependency itself (listing it again duplicated it). Windows git records no executable bits, so `src-tauri/linux` scripts are marked with `git update-index --chmod=+x` and postinst chmods the setup script anyway; `.gitattributes` keeps them LF.
 
 **Rendering, platform and build**
@@ -287,7 +287,7 @@ Measured on Yash's RTX 4060 laptop GPU and Intel Core i7 (§23):
 - **GPU:** llama.cpp's Vulkan; the first GPU load of each run is checked on a known clip (`gpu_check`, the Mac's Metal check generalized) with the same crash markers (`gpu-check.running`, `gpu-disabled`). No usable GPU (or only llvmpipe) means the CPU, and Settings says so. Battery rule from `/sys/class/power_supply`; no full-screen or GPU-load rules (Windows counters).
 - **Model files** download to `~/.local/share/app.ivy.dictation/models`.
 - **Updates:** the release's `.deb` or `.rpm` (whichever owns Ivy, `rpm -qf`), checked against SHA256SUMS.txt, installed through pkexec, then Ivy restarts.
-- **Build:** `.github/workflows/linux.yml` on `ubuntu-22.04` runs the unit tests and the helper's tests, builds both packages, and checks the model on the CPU and on Vulkan (llvmpipe) against the Windows text. `src-tauri/linux/ivy-keys/check.py` tests the helper against the kernel's real input layer.
+- **Build:** `.github/workflows/linux.yml` on `ubuntu-22.04` runs the unit tests and the helper's tests, builds both packages, and checks the model against the Windows text on the CPU (the runners have no GPU; a PC with one checks Vulkan too). Ubuntu 22.04 has no `glslc` package, so CI takes it from LunarG's Vulkan SDK. `src-tauri/linux/ivy-keys/check.py` tests the helper against the kernel's real input layer.
 - **Not on Linux (yet):** ARM, Flatpak/Snap/AppImage, the Wayland input-method protocol, Caps Lock key. Not yet run on a real Linux PC: a real Wayland session, a real GPU, tray, autostart, updater.
 
 ## 20. Open items

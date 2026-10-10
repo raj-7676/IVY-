@@ -144,8 +144,13 @@ pattern of ydotool's and keyd's helpers.
 **CI:** `.github/workflows/linux.yml` on GitHub's `ubuntu-22.04` runners:
 - Unit tests, the helper's tests, then `Ivy_0.2.8_amd64.deb` and `Ivy-0.2.8-1.x86_64.rpm` with `SHA256SUMS-linux.txt`
   as the artifact `Ivy-Linux-x86_64` (14 days).
-- A model check: downloads the 2.4 GB model and transcribes `src-tauri/tests/fixtures/*.wav` on the CPU and on
-  Vulkan (Mesa's llvmpipe, as the runners have no GPU; `GGML_VK_VISIBLE_DEVICES=0`), compared with the Windows text.
+- A model check: downloads the 2.4 GB model and transcribes `src-tauri/tests/fixtures/*.wav` on the CPU, compared
+  with the Windows text. The runners have no GPU; on a PC with one, the same test checks Vulkan too.
+- Ubuntu 22.04 has no `glslc` package, so CI takes it from LunarG's Vulkan SDK (version and SHA-256 at the top of the
+  workflow).
+- Never force the model check onto Mesa's software Vulkan (`GGML_VK_VISIBLE_DEVICES=0`): llvmpipe emulates a GPU on
+  the CPU, and one 3-second clip took over 120 s (the second CI run, 2026-10-10). llama.cpp's own CI runs only small
+  operation tests on it.
 
 ## 6. Status (2026-10-10)
 
@@ -170,7 +175,7 @@ Checked on Yash's PC, in WSL (Ubuntu 24.04):
 **Not verified yet (needs a real Linux PC):**
 - A real GNOME or KDE Wayland session: ivy-keys on real keyboards, pasting into native Wayland apps, XTest through
   XWayland, the capsule over Wayland apps.
-- A real GPU through Vulkan (WSL has none; CI uses llvmpipe).
+- A real GPU through Vulkan (WSL and GitHub's runners have none).
 - The tray icon, Launch at Startup, the updater (pkexec), installing the `.rpm` on Fedora.
 - A desktop without a compositor: the capsule's see-through corners may show black there.
 - One open question: once, in a long WSL session, Ctrl + Shift stopped responding after the test's window manager

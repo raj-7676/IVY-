@@ -478,13 +478,24 @@ mod tests {
         // virtual Macs have a paravirtual GPU of the Apple5 family, without the simdgroup operations every real
         // Apple-silicon GPU has (Apple7 and later), and llama.cpp's fallback kernels for it write "!!!!" (with or
         // without flash attention, 2026-10-10). The app checks for that itself and falls back to the CPU, lib.rs
-        // `gpu_check`. Linux without a GPU (a CI runner): llama.cpp skips software Vulkan unless told
-        // GGML_VK_VISIBLE_DEVICES=0, which makes the "Vulkan" pass run on Mesa's llvmpipe, slowly but for real.
+        // `gpu_check`.
         let require_gpu = cfg!(not(target_os = "macos")) || std::env::var_os("IVY_REQUIRE_METAL").is_some();
-        for d in llama_cpp_2::list_llama_ggml_backend_devices() {
+        let devices = llama_cpp_2::list_llama_ggml_backend_devices();
+        for d in &devices {
             println!("device: {} {} ({:?}, {} MB)", d.backend, d.description, d.device_type, d.memory_total >> 20);
         }
+        // No GPU at all (GitHub's Linux runners): only the CPU can be checked. llama.cpp leaves software Vulkan
+        // (Mesa's llvmpipe) out unless GGML_VK_VISIBLE_DEVICES forces it, and its own CI runs only small operation
+        // tests there, never a model: llvmpipe emulates a GPU on the CPU, and 120 s didn't cover one 3 s clip
+        // (2026-10-10).
+        let has_gpu = devices
+            .iter()
+            .any(|d| matches!(d.device_type, llama_cpp_2::LlamaBackendDeviceType::Gpu | llama_cpp_2::LlamaBackendDeviceType::IntegratedGpu));
         for cpu in [false, true] {
+            if !cpu && !has_gpu {
+                println!("No GPU here: only the CPU is checked");
+                continue;
+            }
             unload_engine();
             let t = Instant::now();
             let eng = engine(&models_dir, cpu).expect("the model loads");
