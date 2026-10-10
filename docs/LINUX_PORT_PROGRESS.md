@@ -200,6 +200,7 @@ hardware, a real GNOME Wayland desktop and the real GPU, with nothing installed 
 sudo apt install build-essential curl pkg-config libssl-dev cmake ninja-build \
   libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
   libvulkan-dev glslc spirv-headers python3-evdev
+# Ubuntu 22.04 has no glslc package: leave it out above and use LunarG's Vulkan SDK (vulkan.lunarg.com), as CI does.
 curl https://sh.rustup.rs -sSf | sh          # Rust; Node 20 or newer from nodejs.org
 git clone -b linux-port https://github.com/raj-7676/IVY-.git ivy && cd ivy
 npm ci && npm run build                      # tauri-build needs dist/

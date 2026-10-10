@@ -13,11 +13,14 @@ permissions:
   contents: read
 
 env:
-  # WebKitGTK, the tray, ALSA, and llama.cpp's Vulkan backend (headers, shader compiler, SPIR-V headers); Ninja for
-  # .cargo/config.toml.
+  # WebKitGTK, the tray, ALSA, and llama.cpp's Vulkan backend (loader, SPIR-V headers); Ninja for .cargo/config.toml.
   BUILD_DEPS: >-
     libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
-    libvulkan-dev glslc spirv-headers ninja-build
+    libvulkan-dev spirv-headers ninja-build
+  # Ubuntu 22.04 has no glslc package (the shader compiler llama.cpp's Vulkan build needs), so it comes from LunarG's
+  # Vulkan SDK, as in llama.cpp's own CI. The hash is the one LunarG publishes for this file.
+  VULKAN_SDK_VERSION: 1.4.363.0
+  VULKAN_SDK_SHA256: 197962f5cbf80baf2775a03336a01cee7c8745686c65aaa70d3f751ade4d7e43
 
 jobs:
   build-linux:
@@ -42,6 +45,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y $BUILD_DEPS
+
+      - name: Install Vulkan SDK
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/vulkansdk.tar.xz" \
+            "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSION.tar.xz"
+          echo "$VULKAN_SDK_SHA256  $RUNNER_TEMP/vulkansdk.tar.xz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/vulkan" && tar -xf "$RUNNER_TEMP/vulkansdk.tar.xz" -C "$RUNNER_TEMP/vulkan"
+          sdk=$(dirname "$(dirname "$(find "$RUNNER_TEMP/vulkan" -path '*/bin/glslc' | head -1)")")
+          "$sdk/bin/glslc" --version
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
 
       # tauri-build needs ../dist at compile time.
       - name: Build Frontend
@@ -95,6 +109,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y $BUILD_DEPS mesa-vulkan-drivers
+
+      - name: Install Vulkan SDK
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/vulkansdk.tar.xz" \
+            "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSION.tar.xz"
+          echo "$VULKAN_SDK_SHA256  $RUNNER_TEMP/vulkansdk.tar.xz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/vulkan" && tar -xf "$RUNNER_TEMP/vulkansdk.tar.xz" -C "$RUNNER_TEMP/vulkan"
+          sdk=$(dirname "$(dirname "$(find "$RUNNER_TEMP/vulkan" -path '*/bin/glslc' | head -1)")")
+          "$sdk/bin/glslc" --version
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
 
       - name: Build Frontend
         run: |
