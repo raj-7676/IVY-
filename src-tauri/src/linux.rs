@@ -14,7 +14,9 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, Window, KEY_PRESS_EVENT, KEY_RELEASE_EVENT};
+use x11rb::protocol::xproto::{
+    AtomEnum, ClientMessageEvent, ConnectionExt as _, EventMask, Window, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
+};
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
@@ -82,6 +84,25 @@ impl X11 {
     }
 }
 
+/// Brings Ivy's main window to the front the way a taskbar does (`_NET_ACTIVE_WINDOW`, source "pager"). GNOME won't
+/// let a window take the focus by itself without the time of the user's click: the tray's "Settings" only showed
+/// "Ivy is ready" behind the app in front (a tester's PC, 2026-10-10). Ivy's one window the window manager lists is
+/// the main one (the capsule is override-redirect). True if it's in front now.
+pub fn bring_own_window_to_front() -> bool {
+    let Some(x) = x11() else { return false };
+    let me = std::process::id();
+    let clients = x.words(x.root, x.clients, AtomEnum::WINDOW.into(), 4096);
+    let Some(w) = clients.into_iter().find(|w| window_pid(*w) == me) else { return false };
+    if active_window() == w {
+        return true;
+    }
+    let event = ClientMessageEvent::new(32, w, x.active, [2u32, 0, 0, 0, 0]);
+    let mask = EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY;
+    let _ = x.conn.send_event(false, x.root, mask, event);
+    let _ = x.conn.flush();
+    false
+}
+
 /// The X11 window in front, 0 for none. On Wayland only X11 windows can be seen; any other app reads as 0.
 fn active_window() -> u32 {
     x11().and_then(|x| x.words(x.root, x.active, AtomEnum::WINDOW.into(), 1).first().copied()).unwrap_or(0)
@@ -104,20 +125,127 @@ pub fn is_own(w: isize) -> bool {
     w > 0 && window_pid(w as u32) == std::process::id()
 }
 
-/// The program, from the window's class: "Slack", "firefox", "Code" ("" if unknown). Tone app lists match on it.
-pub fn window_class(w: isize) -> String {
-    let Some(x) = x11().filter(|_| w > 0) else { return String::new() };
+/// The window's `WM_CLASS`: (instance, class), e.g. ("Navigator", "firefox_firefox").
+fn wm_class(w: isize) -> (String, String) {
+    let Some(x) = x11().filter(|_| w > 0) else { return Default::default() };
     let raw = x.bytes(w as u32, AtomEnum::WM_CLASS.into(), AtomEnum::STRING.into());
     // "instance\0Class\0"
-    let parts: Vec<&[u8]> = raw.split(|b| *b == 0).filter(|p| !p.is_empty()).collect();
-    parts.get(1).or(parts.first()).map(|c| String::from_utf8_lossy(c).into_owned()).unwrap_or_default()
+    let parts: Vec<String> =
+        raw.split(|b| *b == 0).filter(|p| !p.is_empty()).map(|p| String::from_utf8_lossy(p).into_owned()).collect();
+    let instance = parts.first().cloned().unwrap_or_default();
+    let class = parts.get(1).cloned().unwrap_or_else(|| instance.clone());
+    (instance, class)
 }
 
-/// The program's name for the capsule and history: "Slack", "Firefox", "Code".
+/// The program, from the window's class: "Slack", "firefox", "Code" ("" if unknown). Tone app lists match on it.
+pub fn window_class(w: isize) -> String {
+    wm_class(w).1
+}
+
+/// The program's name for the capsule and history, as the app menu shows it: "Text Editor", "Firefox", "Terminal".
+/// A window class alone read "Gnome-text-editor" and "Firefox_firefox" (Ubuntu's snap) on a tester's PC
+/// (2026-10-10); without a desktop entry it's still the class, capitalized.
 pub fn app_label(w: isize) -> String {
-    let class = window_class(w);
+    let (instance, class) = wm_class(w);
+    match desktop_names().get(&class.to_lowercase()).or_else(|| desktop_names().get(&instance.to_lowercase())) {
+        Some(name) => name.clone(),
+        None => display_name(&class),
+    }
+}
+
+/// A window class as the app menu names its program ("Gnome-terminal" -> "Terminal"), or the class capitalized.
+/// The Tone screen shows its app lists this way; they keep the class, which is what Ivy matches on.
+pub fn display_name(class: &str) -> String {
+    if let Some(name) = desktop_names().get(&class.to_lowercase()) {
+        return name.clone();
+    }
     let mut chars = class.chars();
     chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// The installed programs' names (a desktop entry's `Name`), by lower-case `StartupWMClass`, desktop file name and
+/// program file name, which are what a window's class or instance can match. A stronger match wins (`DesktopKey`),
+/// then an entry the app menu shows over a hidden one ("Terminal Preferences" also runs gnome-terminal), then the
+/// first directory, the way the desktop reads them. Read once.
+fn desktop_names() -> &'static std::collections::HashMap<String, String> {
+    static NAMES: OnceLock<std::collections::HashMap<String, String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let home = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
+        let dirs = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+        let mut roots: Vec<PathBuf> = home.into_iter().collect();
+        roots.extend(dirs.split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
+        // Snap's and Flatpak's own folders, in case the session didn't list them.
+        roots.extend(["/var/lib/snapd/desktop", "/var/lib/flatpak/exports/share"].map(PathBuf::from));
+        let mut best: std::collections::HashMap<String, ((DesktopKey, bool), String)> = std::collections::HashMap::new();
+        for dir in roots.iter().map(|r| r.join("applications")) {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for path in entries.flatten().map(|e| e.path()) {
+                if path.extension().and_then(|e| e.to_str()) != Some("desktop") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                let Some(entry) = desktop_entry_keys(&text) else { continue };
+                let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_lowercase();
+                for (key, kind) in std::iter::once((id, DesktopKey::FileName)).chain(entry.keys) {
+                    let rank = (kind, entry.hidden);
+                    if best.get(&key).map_or(true, |(old, _)| rank < *old) {
+                        best.insert(key, (rank, entry.name.clone()));
+                    }
+                }
+            }
+        }
+        best.into_iter().map(|(key, (_, name))| (key, name)).collect()
+    })
+}
+
+/// How a window's class can match a desktop entry, strongest first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum DesktopKey {
+    StartupWmClass,
+    FileName,
+    Program,
+}
+
+#[derive(Debug, PartialEq)]
+struct DesktopEntry {
+    name: String,
+    /// Not in the app menu (`NoDisplay=true`).
+    hidden: bool,
+    keys: Vec<(String, DesktopKey)>,
+}
+
+/// From a desktop file: its `Name` and the lower-case keys a window can match it by (`StartupWMClass`, the program's
+/// file name from `Exec`). Only the main `[Desktop Entry]` group counts (actions have their own Names), and removed
+/// entries (`Hidden=true`) don't.
+fn desktop_entry_keys(text: &str) -> Option<DesktopEntry> {
+    let (mut name, mut keys, mut in_main, mut hidden) = (None, Vec::new(), false, false);
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_main = line == "[Desktop Entry]";
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=').filter(|_| in_main) else { continue };
+        match key.trim() {
+            "Name" if name.is_none() => name = Some(value.trim().to_string()),
+            "Hidden" if value.trim() == "true" => return None,
+            "NoDisplay" => hidden = value.trim() == "true",
+            "StartupWMClass" => keys.push((value.trim().to_lowercase(), DesktopKey::StartupWmClass)),
+            // "env A=b /snap/bin/firefox %u" -> "firefox"
+            "Exec" => {
+                let program = value
+                    .split_whitespace()
+                    .map(|t| t.trim_matches('"'))
+                    .find(|t| *t != "env" && !t.contains('='));
+                if let Some(file) = program.and_then(|p| p.rsplit('/').next()).filter(|f| !f.is_empty()) {
+                    keys.push((file.to_lowercase(), DesktopKey::Program));
+                }
+            }
+            _ => {}
+        }
+    }
+    name.filter(|n| !n.is_empty()).map(|name| DesktopEntry { name, hidden, keys })
 }
 
 pub fn window_title(w: isize) -> String {
@@ -459,4 +587,33 @@ pub fn gpu() -> Option<&'static str> {
             .map(|d| d.description)
     })
     .as_deref()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{desktop_entry_keys, DesktopEntry, DesktopKey};
+
+    #[test]
+    fn desktop_entry_names() {
+        // Ubuntu 24.04's Text Editor: no StartupWMClass, matched by its program; the action's Name doesn't count.
+        let editor = "[Desktop Entry]\nName=Text Editor\nExec=gnome-text-editor %U\n\n[Desktop Action new-window]\nName=New Window\nExec=gnome-text-editor --new-window\n";
+        let entry = |name: &str, hidden, keys: &[(&str, DesktopKey)]| DesktopEntry {
+            name: name.into(),
+            hidden,
+            keys: keys.iter().map(|(k, kind)| (k.to_string(), *kind)).collect(),
+        };
+        assert_eq!(desktop_entry_keys(editor), Some(entry("Text Editor", false, &[("gnome-text-editor", DesktopKey::Program)])));
+        // Ubuntu's snap Firefox.
+        let firefox = "[Desktop Entry]\nExec=env BAMF_DESKTOP_FILE_HINT=/var/lib/snapd/desktop/applications/firefox_firefox.desktop /snap/bin/firefox %u\nStartupWMClass=firefox_firefox\nName=Firefox\n";
+        assert_eq!(
+            desktop_entry_keys(firefox),
+            Some(entry("Firefox", false, &[("firefox", DesktopKey::Program), ("firefox_firefox", DesktopKey::StartupWmClass)]))
+        );
+        // GNOME's hidden "Terminal Preferences" also runs gnome-terminal; it must lose to Terminal itself.
+        let prefs = "[Desktop Entry]\nName=Terminal Preferences\nExec=gnome-terminal --preferences\nNoDisplay=true\nStartupWMClass=Gnome-terminal-preferences\n";
+        let prefs = desktop_entry_keys(prefs).unwrap();
+        assert!(prefs.hidden);
+        assert!((DesktopKey::StartupWmClass, false) < (DesktopKey::Program, prefs.hidden));
+        assert_eq!(desktop_entry_keys("[Desktop Entry]\nName=Gone\nHidden=true\n"), None);
+    }
 }

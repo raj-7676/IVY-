@@ -3,6 +3,11 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { soundEngine } from './utils/audio';
+import { IS_LINUX } from './utils/platform';
+
+// Linux: WebKitGTK draws form controls (the Pause menu's minutes/hours, number boxes) in its light style unless the
+// page says it's dark, which left white text on a white box (a tester's PC, 2026-10-10).
+if (IS_LINUX) document.documentElement.style.colorScheme = 'dark';
 
 interface Props {
   children: ReactNode;

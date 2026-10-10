@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Plus, X } from 'lucide-react';
 import { SettingsConfig, TonePreset } from '../types';
@@ -46,11 +46,30 @@ const InUse: React.FC = () => (
   </span>
 );
 
-/** "Slack.app" reads "Slack", Linux's "discord" reads "Discord"; the list keeps the bundle's full name or the
- *  window class, which is what Ivy matches on (lib.rs). */
-const appLabel = (app: string) => {
+/** "Slack.app" reads "Slack", Linux's "discord" reads "Discord" and "Gnome-terminal" the app menu's "Terminal"
+ *  (`names`, from `useAppNames`); the list keeps the bundle's full name or the window class, which is what Ivy
+ *  matches on (lib.rs). */
+const appLabel = (app: string, names: Record<string, string> = {}) => {
   const name = app.replace(/\.app$/i, '');
-  return IS_LINUX ? name.charAt(0).toUpperCase() + name.slice(1) : name;
+  return IS_LINUX ? names[app] ?? name.charAt(0).toUpperCase() + name.slice(1) : name;
+};
+
+/** Linux: the app menu's names for window classes (lib.rs `app_names`). A window class alone read "Gnome-terminal"
+ *  and "Firefox_firefox" (a tester's PC, 2026-10-10). */
+const useAppNames = (classes: string[]) => {
+  const [names, setNames] = useState<Record<string, string>>({});
+  const key = classes.join('\n');
+  useEffect(() => {
+    if (!IS_LINUX || classes.length === 0) return;
+    invoke<string[]>('app_names', { classes })
+      .then((found) => {
+        if (!Array.isArray(found)) return;
+        const add = Object.fromEntries(classes.map((c, i) => [c, found[i] ?? c]));
+        setNames((old) => ({ ...old, ...add }));
+      })
+      .catch(() => {});
+  }, [key]);
+  return names;
 };
 
 const addAppStyle =
@@ -70,6 +89,7 @@ const RunningAppPicker: React.FC<{ apps: string[]; onPick: (app: string) => void
       .catch(() => setRunning([]));
   };
   const choices = (running ?? []).filter((r) => !apps.some((a) => a.toLowerCase() === r.toLowerCase()));
+  const names = useAppNames(choices);
   return (
     <div className="relative">
       <button type="button" onClick={show} className={addAppStyle} title="Pick from the apps open right now">
@@ -98,7 +118,7 @@ const RunningAppPicker: React.FC<{ apps: string[]; onPick: (app: string) => void
                   }}
                   className="w-full text-left px-3.5 py-2 text-[12px] text-white/80 hover:bg-white/[0.07] transition-colors duration-150 whitespace-nowrap"
                 >
-                  {appLabel(app)}
+                  {appLabel(app, names)}
                 </button>
               ))
             )}
@@ -114,6 +134,7 @@ const AppList: React.FC<{
   apps: string[];
   onChange: (apps: string[]) => void;
 }> = ({ tone, apps, onChange }) => {
+  const names = useAppNames(apps);
   // Windows' own file picker: only the program's name (e.g. "brave.exe") is kept, never its path.
   const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const name = e.target.files?.[0]?.name;
@@ -130,7 +151,7 @@ const AppList: React.FC<{
             className="inline-flex items-center gap-2 pl-3.5 pr-2 py-1.5 rounded-full text-[12px] text-white/85"
             style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' }}
           >
-            {appLabel(app)}
+            {appLabel(app, names)}
             <button
               onClick={() => onChange(apps.filter((a) => a !== app))}
               className="text-white/30 hover:text-red-400 transition-colors duration-150"

@@ -74,6 +74,12 @@ interface DictationComplete {
   text?: string;
 }
 
+/** A press of the real shortcut made with this window in front: the backend's word (`forWizard`, lib.rs
+ *  `HotkeyDown`) on Linux, where the page's own focus read false while the shortcut was held, so the wizard never
+ *  heard it (a tester's PC, 2026-10-10); elsewhere the page's focus, as before. */
+const pressedHere = (e: { payload?: { forWizard?: boolean } }) =>
+  IS_LINUX ? e.payload?.forWizard === true : document.hasFocus();
+
 /** One practice dictation at a time, driven only by backend events:
  *  hotkey-down -> listening, hotkey-up -> transcribing, dictation-complete -> success/failed,
  *  dictation-cancelled (a quick tap) -> back to waiting. Only reacts while `active` (its step is on screen);
@@ -109,8 +115,8 @@ function useWizardDictation(hotkey: string, active: boolean) {
 
   useEffect(() => {
     const subs = [
-      listen('ivy://hotkey-down', () => {
-        if (!activeRef.current || !document.hasFocus() || stateRef.current === 'transcribing') return;
+      listen<{ forWizard?: boolean }>('ivy://hotkey-down', (e) => {
+        if (!activeRef.current || !pressedHere(e) || stateRef.current === 'transcribing') return;
         mine.current = true;
         setMessage(null);
         setSeconds(0);
@@ -399,8 +405,8 @@ const StepShortcut: React.FC<{ hotkey: string; onPick: (key: string) => void }> 
   useEffect(() => {
     const up = () => setDown(false);
     const subs = [
-      listen('ivy://hotkey-down', () => {
-        if (!document.hasFocus()) return;
+      listen<{ forWizard?: boolean }>('ivy://hotkey-down', (e) => {
+        if (!pressedHere(e)) return;
         setDown(true);
         setHeard(true);
       }),

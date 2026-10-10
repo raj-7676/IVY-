@@ -207,6 +207,20 @@ tester's `TEST_RESULTS.md`.
   (`DEVICE LOST`); `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` with the Intel chip was smooth on a test page but added
   0.5 s hitches to Ivy's intro on this laptop. Worth trying on ordinary Intel/AMD PCs and the proprietary NVIDIA
   driver before deciding.
+- **Full app test, same evening** (every screen and button through AT-SPI, the tray through D-Bus, speech from a
+  synthesizer into a temporary virtual mic): dictation into Text Editor, Terminal, Firefox and LibreOffice Writer
+  on GPU and CPU, self-correction, hands-free, cancel, Alt + V, Touch Up, Ctrl + Shift with Ctrl+Shift+T, pause,
+  History, Dictionary, snippets, Tone, the wizard, Launch at Startup, updates, tray, quit: all work. Fixed on the way:
+  - App names: the capsule said "Pasted to Gnome-text-editor", "Firefox_firefox", "Gjs" (window classes). Now the
+    app menu's names from the desktop entries ("Text Editor", "Firefox", "Terminal", "Desktop"), also in History and
+    on the Tone screen.
+  - Tray "Settings" and a second launch opened Ivy behind the app in front ("Ivy is ready"): GNOME's focus-stealing
+    prevention. Ivy now asks the way a taskbar does.
+  - Settings' microphone list was ALSA's plumbing ("Discard all samples…" = the null device, six identical
+    "HDA Intel PCH, ALC256 Analog"). Linux now says it uses the desktop's input and records the default.
+  - "Couldn't paste automatically — press Alt + V to pas…": cut off (wider Noto Sans); wraps to two lines now.
+  - Pause menu: minutes/hours was white on white (WebKitGTK's light form controls); the page is dark now.
+  - Wizard steps 1, 5 and 6 never heard the shortcut (the page's focus read false); they go by the backend now.
 - **Limit:** WebKitGTK's frame clock is a 60 Hz timer here (webkit://gpu "VBlank type: Timer"), so animations
   can't follow a 144 Hz screen.
 

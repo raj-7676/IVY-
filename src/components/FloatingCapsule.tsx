@@ -3,6 +3,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertTriangle, Check, ExternalLink, Mic, RefreshCw, Wand2, X } from 'lucide-react';
 import { CapsuleMode, TonePreset } from '../types';
+import { IS_LINUX } from '../utils/platform';
+
+/** How a long capsule message fits: one line cut short, or on Linux up to two lines (see the pasted message). */
+const MESSAGE_FIT = IS_LINUX ? 'leading-tight line-clamp-2' : 'truncate';
 
 interface FloatingCapsuleProps {
   mode: CapsuleMode;
@@ -287,7 +291,9 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
                   user had actually copied, e.g. a password or API key). */}
               {/* No app name: an app on Linux's Wayland that Ivy can't see. No held-back key there either (no
                   Alt + V on Wayland): the text waits in History. */}
-              <span className="text-[11.5px] font-medium text-white truncate">
+              {/* Linux: up to two lines. Its fallback font (Noto Sans) is wider, and the held-back message was cut to "press
+                  Alt + V to pas" (a tester's PC, 2026-10-10). */}
+              <span className={`text-[11.5px] font-medium text-white ${MESSAGE_FIT}`}>
                 {pasted
                   ? activeApp ? `Pasted to ${activeApp}` : 'Pasted'
                   : manualPasteHotkey
@@ -411,7 +417,7 @@ export const FloatingCapsule: React.FC<FloatingCapsuleProps> = ({
               <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-[#E59530]/20 border border-[#E59530]/50">
                 <AlertTriangle className="w-3 h-3 text-[#E59530]" />
               </div>
-              <span className="text-[11.5px] font-medium text-white truncate">{notice}</span>
+              <span className={`text-[11.5px] font-medium text-white ${MESSAGE_FIT}`}>{notice}</span>
             </motion.div>
           )}
 

@@ -456,6 +456,17 @@ struct ActiveContext {
     tone_preset: String,
 }
 
+/// `ivy://hotkey-down`: the app in front and its tone, and whether this press is the setup wizard's practice (the
+/// wizard is open and Ivy's own window is in front). The wizard goes by this on Linux, where the page's own focus
+/// read false while the shortcut was held (a tester's PC, 2026-10-10).
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct HotkeyDown {
+    #[serde(flatten)]
+    context: ActiveContext,
+    for_wizard: bool,
+}
+
 // All of Ivy's data lives in Local AppData (%LOCALAPPDATA%\app.ivy.dictation), never Roaming: a company PC
 // with roaming profiles copies Roaming AppData to a server at logoff, and recordings must stay on this PC.
 fn settings_path(app: &tauri::AppHandle) -> std::path::PathBuf {
@@ -1143,6 +1154,8 @@ fn has_text_focus(pid: isize) -> bool {
 fn foreground_app_label() -> String {
     match linux::foreground() {
         linux::WAYLAND_APP => String::new(),
+        // The desktop's own window (its icons) belongs to a helper program ("Gjs" on Ubuntu), not an app.
+        w if linux::is_desktop(w) => "Desktop".to_string(),
         w => {
             let name = linux::app_label(w);
             if name.is_empty() { "Desktop".to_string() } else { name }
@@ -3234,6 +3247,17 @@ fn show_main_window(app: tauri::AppHandle) {
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+    // Linux: GNOME keeps a window that asks for the focus itself behind the app in front, so ask the way a taskbar
+    // does, once the window is mapped (a few tries; the window manager answers asynchronously).
+    #[cfg(target_os = "linux")]
+    std::thread::spawn(|| {
+        for _ in 0..8 {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            if linux::bring_own_window_to_front() {
+                break;
+            }
+        }
+    });
 }
 
 #[cfg(windows)]
@@ -3470,6 +3494,16 @@ fn intro_done() {
     }
 }
 
+/// What the Tone screen shows for each program in its lists. Linux: the app menu's names for window classes
+/// ("Gnome-terminal" reads "Terminal"); elsewhere the names as they are.
+#[tauri::command]
+fn app_names(classes: Vec<String>) -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    return classes.iter().map(|c| linux::display_name(c)).collect();
+    #[cfg(not(target_os = "linux"))]
+    classes
+}
+
 #[tauri::command]
 fn model_status() -> model::Status {
     model::status()
@@ -3618,7 +3652,13 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
     }
     let ctx = get_active_context(app.clone());
     let settings = load_settings(app);
-    match audio::Recorder::start(&settings.selected_mic) {
+    // Linux: always the desktop's default input (its Sound settings). The device list there is ALSA's plumbing
+    // ("null" records silence), so a pick saved from it is ignored (a tester's PC, 2026-10-10).
+    #[cfg(target_os = "linux")]
+    let mic = "";
+    #[cfg(not(target_os = "linux"))]
+    let mic = settings.selected_mic.as_str();
+    match audio::Recorder::start(mic) {
         Ok(recorder) => {
             *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(PendingDictation {
                 id,
@@ -3659,7 +3699,7 @@ fn handle_hotkey_down(app: &tauri::AppHandle) {
     }
     position_capsule_window(app);
     bridge_capsule_show(app, true);
-    let _ = app.emit("ivy://hotkey-down", ctx);
+    let _ = app.emit("ivy://hotkey-down", HotkeyDown { context: ctx, for_wizard });
 
     // Real input level from the one stream Ivy already has open, so UI
     // meters never need to open the mic a second time (a concurrent WebView2
@@ -4375,11 +4415,7 @@ pub fn run() {
         // is the exact class of bug ("multiple instances fighting over the
         // same hotkey/tray icon") the project has hit before.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            show_main_window(app.clone());
         }))
         // Real Windows Run-key registration so Ivy is actually running (tray
         // + hotkey live) the moment the machine boots, with no window ever
@@ -4447,6 +4483,7 @@ pub fn run() {
             cancel_dictation,
             model_status,
             intro_done,
+            app_names,
             retry_model_download,
             update::check_for_update,
             update::install_update,
@@ -4629,11 +4666,7 @@ pub fn run() {
                             }
                         }
                         "settings" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
+                            show_main_window(app.clone());
                             let _ = app.emit("ivy://open-settings", ());
                         }
                         "quit" => app.exit(0),

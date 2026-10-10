@@ -213,6 +213,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   }, []);
 
   useEffect(() => {
+    if (IS_LINUX) return; // no device list there, see the Microphone row
     void loadMics();
     // Real bug (Yash, 2026-09-23): a newly plugged-in mic didn't show up
     // until the whole app was restarted — this only ever fetched once, on
@@ -368,7 +369,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             </Row>
           ))}
-          {/* Microphone */}
+          {/* Microphone. Linux: the desktop's own input (its Sound settings). The device list there was ALSA's
+              plumbing, not microphones: "null" (which records silence), the sound server, and six same-named
+              variants of one sound card (a tester's PC, 2026-10-10). lib.rs always records the default there. */}
+          {IS_LINUX ? (
+          <Row
+            title="Microphone"
+            description="Ivy records from the input chosen in your desktop's Sound settings. Change it there."
+          >
+            <span className="text-[12px] text-white/60">System input</span>
+          </Row>
+          ) : (
           <Row title="Microphone" description="The input Ivy records from.">
             {micsBlocked || mics.length === 0 ? (
               <button
@@ -428,6 +439,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             )}
           </Row>
+          )}
 
           {/* A Mac has one chip and no GPU or CPU mode to pick: the model always runs on the chip's GPU (lib.rs
               should_use_gpu). */}
