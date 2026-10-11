@@ -1,7 +1,6 @@
 # Ivy for Mac: progress and handoff
 
-Written 2026-10-10 by Claude (on Yash's Windows PC) for whoever picks this up next, most likely Claude running on
-the test MacBook. You have none of the Windows session's memory, so everything you need is here. Read it all before
+Written 2026-10-10 by Yash (on the Windows PC) for whoever picks this up next, most likely on the test MacBook. You have none of the Windows session's memory, so everything you need is here. Read it all before
 changing anything.
 
 ## 1. What this is
@@ -21,8 +20,8 @@ rulebooks, history, tones. Rust + Tauri v2 backend, React 19 + TypeScript + Tail
 - **Nothing may be a gimmick:** no invented numbers, no control that only pretends to work, and no UI copy that
   claims something the app doesn't do. A control that can't work is removed rather than caveated.
 - **One model only.** Don't propose other or bigger models.
-- **Git:** commits are authored as `Yashvanraj` (`git -c user.name=Yashvanraj commit ...`). **Never** add a Claude
-  co-author line or a "Generated with Claude Code" line to commits, PRs or releases. Push only the `macos-port`
+- **Git:** commits are authored as `Yashvanraj` (`git -c user.name=Yashvanraj commit ...`). **Never** add a
+  co-author line or a "Generated with" line to commits, PRs or releases. Push only the `macos-port`
   branch. Never push or merge into `main`, and never publish a GitHub release unless Yash says so.
 - **Don't break Windows.** Every Mac change sits behind `#[cfg(target_os = "macos")]` (Rust) or `IS_MAC` (frontend).
   On Windows, the suite is `cargo test --lib -- --test-threads=1` in `src-tauri` (70 passed, 0 failed, 2 ignored on
@@ -202,7 +201,7 @@ and Microphone permissions belong to **Terminal**, not Ivy. To build the disk im
 
 1. Make the change behind the platform switch. Keep Windows identical.
 2. On the Mac: `cargo test --lib -- --test-threads=1`, then `npx tsc --noEmit` and `npm run build` in the repo root.
-3. Commit as Yashvanraj (no Claude attribution) and push `macos-port`. GitHub builds a new `.dmg` (Actions tab →
+3. Commit as Yashvanraj (no other author lines) and push `macos-port`. GitHub builds a new `.dmg` (Actions tab →
    "macOS Build" → artifact `Ivy-macOS-AppleSilicon`), or build it locally with `npx tauri build --bundles app,dmg`.
 4. Update this file, `IVY.md` §19/§5 and `docs/MAC_TESTING.md` when behaviour changes.
 5. Tell Yash in plain words what changed and what to try.
