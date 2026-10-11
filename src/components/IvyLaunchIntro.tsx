@@ -716,8 +716,9 @@ export const IvyLaunchIntro: React.FC<IvyLaunchIntroProps> = ({ onComplete }) =>
         </motion.div>
       </div>
     </div>
-    {/* Atmospheric dust particles layer */}
-    <AtmosphericDust />
+    {/* Atmospheric dust particles layer. Linux: a full-window canvas repainted on every frame (SOFTWARE_PAINT) held
+        the intro at 33 fps in a maximized window, 50 without it (a tester's PC, 2026-10-11). */}
+    {!SOFTWARE_PAINT && <AtmosphericDust />}
   </motion.div>
 );
 };

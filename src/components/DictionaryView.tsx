@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { SettingsConfig } from '../types';
-import { MOD } from '../utils/platform';
+import { MOD, PAGE_COLUMN } from '../utils/platform';
 
 interface DictionaryViewProps {
   settings: SettingsConfig;
@@ -45,7 +45,7 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ settings, onUpda
 
   return (
     <div id="screen-dictionary" className="flex-1 flex flex-col h-full overflow-y-auto">
-      <div className="px-8 pt-7 pb-10 max-w-2xl w-full mx-auto space-y-7">
+      <div className={`px-8 pt-7 pb-10 ${PAGE_COLUMN} space-y-7`}>
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight text-white/95">Dictionary</h1>
           <p className="text-[12.5px] text-white/40 mt-1.5 leading-relaxed max-w-md">

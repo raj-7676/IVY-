@@ -23,6 +23,9 @@ fn main() {
   // - On a Wayland desktop Ivy's windows are X11 windows (XWayland): Wayland lets no app place a window or keep it
   //   above others, which the capsule needs (src/linux.rs).
   // - WebKitGTK's DMA-BUF renderer leaves the window blank on some NVIDIA drivers.
+  // - GStreamer's VA-API H.264 decoder (vah264dec, ranked above the software one) played the intro film green for
+  //   its first seconds, every showing after the first (Intel, a tester's PC, 2026-10-11; GStreamer issue 1215).
+  //   Ranked last, it is used only on a PC with no other H.264 decoder.
   #[cfg(target_os = "linux")]
   {
     if std::env::var_os("GDK_BACKEND").is_none() && std::env::var_os("DISPLAY").is_some() {
@@ -30,6 +33,9 @@ fn main() {
     }
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
       std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+    if std::env::var_os("GST_PLUGIN_FEATURE_RANK").is_none() {
+      std::env::set_var("GST_PLUGIN_FEATURE_RANK", "vah264dec:MARGINAL");
     }
   }
   app_lib::run();

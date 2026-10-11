@@ -5,7 +5,7 @@ import { ChevronDown, Check, Cpu, Zap, Activity, RefreshCw } from 'lucide-react'
 import { SettingsConfig, HardwareMode, HardwareStatus } from '../types';
 import { ModeMatrix, modeCombo } from './ModeMatrix';
 import { useEscape } from '../utils/useEscape';
-import { IS_LINUX, IS_MAC, IS_WINDOWS, keyLabel, useDesktop } from '../utils/platform';
+import { IS_LINUX, IS_MAC, IS_WINDOWS, PAGE_COLUMN, keyLabel, useDesktop } from '../utils/platform';
 import { PermissionRows, usePermissions } from './MacPermissions';
 import { LinuxKeyboardNotice } from './LinuxKeyboard';
 
@@ -274,7 +274,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <p className="text-[12.5px] text-white/40 mt-1">How Ivy listens, writes, and pastes.</p>
       </header>
 
-      <div className="px-8 pb-10 max-w-2xl w-full mx-auto">
+      <div className={`px-8 pb-10 ${PAGE_COLUMN}`}>
         {IS_MAC && (
           <div className="mb-6">
             <div className="text-[11px] uppercase tracking-wider text-white/30 mb-2.5">Permissions</div>

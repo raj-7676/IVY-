@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Plus, X } from 'lucide-react';
 import { SettingsConfig, TonePreset } from '../types';
-import { IS_LINUX, IS_MAC, useDesktop } from '../utils/platform';
+import { IS_LINUX, IS_MAC, PAGE_COLUMN, useDesktop } from '../utils/platform';
 import { useEscape } from '../utils/useEscape';
 
 interface ToneViewProps {
@@ -195,7 +195,7 @@ export const ToneView: React.FC<ToneViewProps> = ({ settings, onUpdateSettings }
 
   return (
     <div id="screen-tone" className="flex-1 flex flex-col h-full overflow-y-auto">
-      <div className="px-8 pt-7 pb-10 max-w-2xl w-full mx-auto space-y-7">
+      <div className={`px-8 pt-7 pb-10 ${PAGE_COLUMN} space-y-7`}>
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight text-white/95">Tone</h1>
           <p className="text-[12.5px] text-white/40 mt-1.5 leading-relaxed max-w-md">

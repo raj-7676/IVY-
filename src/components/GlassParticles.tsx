@@ -1,4 +1,10 @@
 import React, { useEffect, useRef } from 'react';
+import { SOFTWARE_PAINT } from '../utils/platform';
+
+// Linux: a moving mote repaints the whole window on every frame there (SOFTWARE_PAINT): a full core, plus half of the
+// X server's, in a maximized window, which made every click and page wait (a tester's PC, 2026-10-11). The motes are
+// drawn once there and stay still.
+const STILL = SOFTWARE_PAINT;
 
 interface GlassParticlesProps {
   /** Accent as "r, g, b" — e.g. "255, 107, 0". */
@@ -47,6 +53,14 @@ export const GlassParticles: React.FC<GlassParticlesProps> = ({ accentRgb, count
       if (!canvas.parentElement) return;
       width = canvas.width = canvas.parentElement.clientWidth;
       height = canvas.height = canvas.parentElement.clientHeight;
+      // A resize empties the canvas; still motes are spread over the new size and drawn again.
+      if (STILL) {
+        for (const p of particles) {
+          p.x = Math.random() * width;
+          p.y = Math.random() * height;
+        }
+        resumeRef.current();
+      }
     });
     if (canvas.parentElement) resizeObserver.observe(canvas.parentElement);
 
@@ -139,7 +153,7 @@ export const GlassParticles: React.FC<GlassParticlesProps> = ({ accentRgb, count
         ctx.restore();
       }
 
-      animFrame = requestAnimationFrame(render);
+      animFrame = STILL ? 0 : requestAnimationFrame(render);
     };
 
     resumeRef.current = () => {

@@ -203,6 +203,15 @@ tester's `TEST_RESULTS.md`.
     frames; each page's first visit froze 55-190 ms. Fixes behind `SOFTWARE_PAINT` (IVY.md §5/§19); measured after:
     intro frames 18-20 ms, first visits 17 ms, Ivy in the background 0 CPU.
   - The start-up pre-warm landed in the intro (the window takes ~1.9 s to appear); it now waits for `intro_done`.
+- **Second day (2026-10-11), tester's reports:**
+  - The intro film was green for its first 4 s (up to its first keyframe) on every showing after the first: GStreamer's
+    VA-API decoder (`vah264dec`, Intel). `main.rs` ranks it MARGINAL; the software decoder plays it. Checked: three
+    showings in a row, no green (1.7 cores while the 4K film plays).
+  - "Everything lags" in a maximized window: the moving motes repainted all 1854x1048 pixels 60 times a second (Ivy
+    0.97 core, X server 0.55, 48 fps). They are now still on Linux: 0.04 and 0.03 cores. The intro's dust layer is
+    gone on Linux (maximized: 33 -> 50 fps).
+  - Dictionary, Tone and Settings stayed a narrow centred column in a maximized window; they now use the full width
+    on Linux (`PAGE_COLUMN`), like Home and History.
 - **Tried and not adopted:** GPU drawing (`WEBKIT_DISABLE_DMABUF_RENDERER=0`) crashed nouveau's channel for WebKit
   (`DEVICE LOST`); `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` with the Intel chip was smooth on a test page but added
   0.5 s hitches to Ivy's intro on this laptop. Worth trying on ordinary Intel/AMD PCs and the proprietary NVIDIA
