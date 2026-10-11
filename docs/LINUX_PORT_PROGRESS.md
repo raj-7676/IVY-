@@ -1,7 +1,6 @@
 # Ivy for Linux: progress and handoff
 
-Written 2026-10-10 by Claude (on Yash's Windows PC) for whoever picks this up next, for example Claude running on a
-Linux PC. You have none of the Windows session's memory, so everything you need is here. Read it all before
+Written 2026-10-10 by Yash (on the Windows PC) for whoever picks this up next, for example on a Linux PC. You have none of the Windows session's memory, so everything you need is here. Read it all before
 changing anything.
 
 ## 1. What this is
@@ -24,8 +23,8 @@ rulebooks, history, tones. Rust + Tauri v2 backend, React 19 + TypeScript + Tail
 - **Nothing may be a gimmick:** no invented numbers, no control that only pretends to work, and no UI copy that
   claims something the app doesn't do. A control that can't work is removed rather than caveated.
 - **One model only.** Don't propose other or bigger models.
-- **Git:** commits are authored as `Yashvanraj` (`git -c user.name=Yashvanraj commit ...`). **Never** add a Claude
-  co-author line or a "Generated with Claude Code" line to commits, PRs or releases. Push only the `linux-port`
+- **Git:** commits are authored as `Yashvanraj` (`git -c user.name=Yashvanraj commit ...`). **Never** add a
+  co-author line or a "Generated with" line to commits, PRs or releases. Push only the `linux-port`
   branch. Never push or merge into `main`, and never publish a GitHub release unless Yash says so.
 - **Don't break Windows.** Every Linux change sits behind `#[cfg(target_os = "linux")]` (Rust) or `IS_LINUX`
   (frontend). On Windows, the suite is `cargo test --lib -- --test-threads=1` in `src-tauri` (70 passed, 0 failed,
@@ -186,7 +185,7 @@ Checked on Yash's PC, in WSL (Ubuntu 24.04):
 
 An Ubuntu 24.04.5 "Try Ubuntu" stick on Yash's laptop (Intel UHD + RTX 4060 Laptop, 144 Hz screen), **X11** session.
 This laptop's screen is wired to the NVIDIA chip (a MUX switch), so the whole desktop ran on the free nouveau/NVK
-driver through zink (`Xorg.0.log`: "glamor ... on zink ... NVK"). Claude ran the test there; full notes in the
+driver through zink (`Xorg.0.log`: "glamor ... on zink ... NVK"). The test ran there; full notes in the
 tester's `TEST_RESULTS.md`.
 - **Worked:** the `.deb` installs with ivy-keys `root:input` setgid; the model downloads and is checked; the Vulkan
   check passes on the RTX 4060 (NVK); dictation types into apps; Alt + Space and Ctrl + Shift.
@@ -346,7 +345,7 @@ All in WSL (Ubuntu 24.04) on Yash's PC, with a copy of the worktree in `~/ivy` (
 1. Make the change behind the platform switch. Keep Windows identical.
 2. On Linux: `cargo test --lib -- --test-threads=1` in `src-tauri`, the helper's tests and `check.py` if it changed,
    then `npx tsc --noEmit` and `npm run build` in the repo root. On Windows: the same `cargo test`.
-3. Commit as Yashvanraj (no Claude attribution) and push `linux-port`. GitHub builds new packages (Actions tab →
+3. Commit as Yashvanraj (no other author lines) and push `linux-port`. GitHub builds new packages (Actions tab →
    "Linux Build" → artifact `Ivy-Linux-x86_64`).
 4. Update this file, `IVY.md` §19/§5 and `docs/LINUX_TESTING.md` when behaviour changes.
 5. Tell Yash in plain words what changed and what to try.
