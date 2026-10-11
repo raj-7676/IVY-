@@ -1,6 +1,6 @@
 # Ivy
 
-**Talk, and clean text appears wherever your cursor is. Fully offline and free, with all its source code public, for Windows.**
+**Talk, and clean text appears wherever your cursor is. Fully offline and free, with all its source code public, for Windows and Linux.**
 
 Hold a key, speak naturally, let go. Ivy turns your speech into clean, ready-to-send text and pastes it
 into whatever you were typing in: email, chat, documents, code editors, browsers, anything.
@@ -9,6 +9,8 @@ Everything happens on your own computer. No account, no subscription, no interne
 cloud. Your voice never leaves your PC.
 
 **[Download Ivy for Windows](https://github.com/raj-7676/IVY-/releases/latest)**
+
+**[Download Ivy for Linux](#linux)**
 
 ![Ivy turning "um, send it Tuesday, no wait, Thursday at 3" into "Send it Thursday at 3 PM."](docs/ivy-teaser.webp)
 
@@ -114,6 +116,22 @@ After installing, you can delete the downloaded files.
 
 **"Windows protected your PC"?** Ivy is new and not code-signed yet, so Windows SmartScreen may warn
 you. Click **More info**, then **Run anyway**. All the code is here, so anyone can check what it does.
+
+### Linux
+
+For 64-bit PCs with Ubuntu 22.04 or later, Linux Mint 21 or later, Debian 12, or Fedora 37 or later.
+
+1. From the **[latest release](https://github.com/raj-7676/IVY-/releases/latest)**, download
+   `Ivy_<version>_amd64.deb` (Ubuntu, Mint, Debian) or `Ivy-<version>-1.x86_64.rpm` (Fedora).
+2. Open a terminal in the folder with the file and install it:
+   - Ubuntu, Mint, Debian: `sudo apt install ./Ivy_<version>_amd64.deb`
+   - Fedora: `sudo dnf install ./Ivy-<version>-1.x86_64.rpm`
+3. Start **Ivy** from your apps menu. It downloads its speech model once, then the setup wizard opens by
+   itself. Hold **Ctrl + Shift** and talk.
+
+On an X11 desktop (Linux Mint, or "Ubuntu on Xorg" picked at the login screen) Ivy works as on Windows. On
+Wayland (Ubuntu's and Fedora's default) Ctrl + Shift is the only key, and text Ivy can't paste waits in
+History. Tested on Ubuntu 24.04 with X11; Wayland is still being tested.
 
 ### System requirements
 
