@@ -10,7 +10,7 @@ cloud. Your voice never leaves your PC.
 
 **[Download Ivy for Windows](https://github.com/raj-7676/IVY-/releases/latest)**
 
-**[Download Ivy for Linux](#linux)**
+**[Download Ivy for Linux](https://github.com/raj-7676/IVY-/releases/tag/v0.2.8-linux)** ([install steps](#linux))
 
 ![Ivy turning "um, send it Tuesday, no wait, Thursday at 3" into "Send it Thursday at 3 PM."](docs/ivy-teaser.webp)
 
@@ -121,11 +121,11 @@ you. Click **More info**, then **Run anyway**. All the code is here, so anyone c
 
 For 64-bit PCs with Ubuntu 22.04 or later, Linux Mint 21 or later, Debian 12, or Fedora 37 or later.
 
-1. From the **[latest release](https://github.com/raj-7676/IVY-/releases/latest)**, download
-   `Ivy_<version>_amd64.deb` (Ubuntu, Mint, Debian) or `Ivy-<version>-1.x86_64.rpm` (Fedora).
+1. From the **[Linux release](https://github.com/raj-7676/IVY-/releases/tag/v0.2.8-linux)**, download
+   `Ivy_0.2.8_amd64.deb` (Ubuntu, Mint, Debian) or `Ivy-0.2.8-1.x86_64.rpm` (Fedora).
 2. Open a terminal in the folder with the file and install it:
-   - Ubuntu, Mint, Debian: `sudo apt install ./Ivy_<version>_amd64.deb`
-   - Fedora: `sudo dnf install ./Ivy-<version>-1.x86_64.rpm`
+   - Ubuntu, Mint, Debian: `sudo apt install ./Ivy_0.2.8_amd64.deb`
+   - Fedora: `sudo dnf install ./Ivy-0.2.8-1.x86_64.rpm`
 3. Start **Ivy** from your apps menu. It downloads its speech model once, then the setup wizard opens by
    itself. Hold **Ctrl + Shift** and talk.
 
