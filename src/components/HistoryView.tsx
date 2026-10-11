@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { DictationSession } from '../types';
 import { useEscape } from '../utils/useEscape';
-import { keyLabel } from '../utils/platform';
+import { IS_LINUX, keyLabel } from '../utils/platform';
 
 interface HistoryViewProps {
   sessions: DictationSession[];
@@ -73,6 +73,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
         setPastedId(session.id);
         setTimeout(() => setPastedId(null), 1800);
       } else {
+        // Linux: no paste holds the text for Alt + V and leaves the clipboard alone, so "Copied" wasn't true (a
+        // tester's PC, 2026-10-11); it's copied here, as the Copy button does.
+        if (IS_LINUX) await navigator.clipboard?.writeText(session.fullTranscript);
         setToast('Copied — no text box found');
       }
     } catch {
@@ -298,8 +301,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ sessions, onDeleteSess
                   onClick={() => setExpandedId(isExpanded ? null : session.id)}
                   className="group relative flex gap-5 py-4 cursor-pointer"
                 >
-                  {/* Timestamp rail */}
-                  <div className="w-24 shrink-0 pt-0.5">
+                  {/* Timestamp rail. Linux shows older days as "Oct 10, 7:47 PM" (get_history), one line at w-28. */}
+                  <div className={`${IS_LINUX ? 'w-28' : 'w-24'} shrink-0 pt-0.5`}>
                     <div className="font-mono text-[11px] text-white/45 tabular leading-snug">
                       {session.timestamp}
                     </div>

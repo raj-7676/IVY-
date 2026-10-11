@@ -118,6 +118,11 @@ impl LiteEngine {
 
         let backend = get_or_init_backend()?;
         let mparams = LlamaModelParams::default().with_n_gpu_layers(if is_cpu_mode { 0 } else { 99 });
+        // Linux: with no layers on it, llama.cpp still sent the prompt's large operations to the graphics card
+        // (op_offload) and kept a 645 MB compute buffer there in CPU mode (a tester's PC, 2026-10-11). An empty
+        // device list keeps CPU mode off the graphics card, as Settings says.
+        #[cfg(target_os = "linux")]
+        let mparams = if is_cpu_mode { mparams.with_devices(&[]).map_err(|e| e.to_string())? } else { mparams };
         let model = LlamaModel::load_from_file(&backend, &model_path, &mparams)
             .map_err(|e| format!("Lite model load failed: {e}"))?;
 

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Pause, Play } from 'lucide-react';
+import { ChevronDown, Pause, Play } from 'lucide-react';
+import { IS_LINUX } from '../utils/platform';
 
 const ACCENT_RGB = '255, 107, 0';
 const MAX_MINUTES = 24 * 60;
@@ -98,14 +99,21 @@ export const PauseControl: React.FC = () => {
               onKeyDown={(e) => e.key === 'Enter' && pause(Number(amount) * (unit === 'hours' ? 60 : 1))}
               className="w-14 px-2 py-1.5 rounded-lg text-[12px] text-white/85 bg-white/[0.05] border border-white/[0.09] outline-none text-center"
             />
-            <select
-              value={unit}
-              onChange={(e) => setUnit(e.target.value as 'minutes' | 'hours')}
-              className="flex-1 px-2 py-1.5 rounded-lg text-[12px] text-white/85 bg-[#16121c] border border-white/[0.09] outline-none"
-            >
-              <option value="minutes">minutes</option>
-              <option value="hours">hours</option>
-            </select>
+            {/* Linux: WebKitGTK draws a <select> as the desktop's own combo box, 42 px tall beside 30 px neighbours
+                (a tester's PC, 2026-10-11); it's drawn plain there, with its own arrow. */}
+            <div className="relative flex-1">
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as 'minutes' | 'hours')}
+                className={`w-full px-2 py-1.5 rounded-lg text-[12px] text-white/85 bg-[#16121c] border border-white/[0.09] outline-none ${IS_LINUX ? 'appearance-none h-[30px] pr-7' : ''}`}
+              >
+                <option value="minutes">minutes</option>
+                <option value="hours">hours</option>
+              </select>
+              {IS_LINUX && (
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/50" />
+              )}
+            </div>
             <button
               onClick={() => pause(Number(amount) * (unit === 'hours' ? 60 : 1))}
               className="px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.14] text-[12px] font-medium text-white/85"

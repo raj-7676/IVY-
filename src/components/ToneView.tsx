@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Plus, X } from 'lucide-react';
 import { SettingsConfig, TonePreset } from '../types';
@@ -90,6 +90,11 @@ const RunningAppPicker: React.FC<{ apps: string[]; onPick: (app: string) => void
   };
   const choices = (running ?? []).filter((r) => !apps.some((a) => a.toLowerCase() === r.toLowerCase()));
   const names = useAppNames(choices);
+  // The last row's list opened past the window's bottom edge (a tester's PC, 2026-10-11); the page scrolls to show it.
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) menuRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [open, running]);
   return (
     <div className="relative">
       <button type="button" onClick={show} className={addAppStyle} title="Pick from the apps open right now">
@@ -100,6 +105,7 @@ const RunningAppPicker: React.FC<{ apps: string[]; onPick: (app: string) => void
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div
+            ref={menuRef}
             className="absolute z-20 top-full left-0 mt-1.5 min-w-[220px] max-h-64 overflow-y-auto rounded-2xl py-1"
             style={{ backgroundColor: 'rgba(16, 13, 20, 0.97)', border: '1px solid rgba(255,255,255,0.1)' }}
           >

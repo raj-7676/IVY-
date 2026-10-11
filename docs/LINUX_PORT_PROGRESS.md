@@ -212,6 +212,26 @@ tester's `TEST_RESULTS.md`.
     gone on Linux (maximized: 33 -> 50 fps).
   - Dictionary, Tone and Settings stayed a narrow centred column in a maximized window; they now use the full width
     on Linux (`PAGE_COLUMN`), like Home and History.
+- **Stress test, same morning** (every button, menu, field and tray item; bad input; rapid taps; a 52 s dictation;
+  pure noise; the smallest window). Fixed, Linux only, each checked in the rebuilt app:
+  - CPU mode still used the graphics card: llama.cpp kept a 645 MB Vulkan compute buffer and ran the prompt's big
+    operations there. `lite.rs` gives CPU mode an empty device list. CPU now: 12 s clip 4.5 s, 52 s clip 19.2 s.
+  - History and Home said "Today" for yesterday's dictations (the label was written once, at save time):
+    `get_history` works it out from `created_at` each time. The date column is wider so "Oct 10, 7:47 PM" fits.
+  - Downloaded recordings were named "Today__7_55_AM" forever; now "2026-10-10 19-47".
+  - History's "Paste again" said "Copied" but only held the text for Alt + V; it now copies.
+  - Tone's "Add app" list on the last row opened past the window's bottom edge; the page scrolls to show it.
+  - The Pause menu's minutes/hours box was 42 px tall (the desktop's own combo box) beside 30 px neighbours.
+  - The tray had no way back to the window but "Settings": "Open Ivy" added (a click on the icon only opens the menu).
+  - Launch at Startup's switch had no name for screen readers; "Alt + V" broke across two lines in the wizard.
+  - Worked as it should: intro Skip/Esc/close, Pause (blocks the key; Resume), shortcut switch, GPU/CPU switch,
+    Launch at Startup, Check for updates, all 7 wizard steps (key, mic button, self-correction), History (keep-for,
+    search, copy, retry, delete with its audio, similar attempts, Clear all dialog), Dictionary and snippet limits,
+    Tone modes and app lists, Alt + V, capsule cancel, hands-free, five rapid taps, window buttons, second launch,
+    13 s of pure noise (no words typed).
+  - For Yash (shared code, not changed): back-to-back dictations are glued ("terminal.The"); the fonts Plus Jakarta
+    Sans and Syne are not bundled, so every PC shows a fallback; a snippet saved with an existing trigger replaces it
+    without a word; "Paste again" in History can never paste (Ivy's window is in front when it's clicked).
 - **Tried and not adopted:** GPU drawing (`WEBKIT_DISABLE_DMABUF_RENDERER=0`) crashed nouveau's channel for WebKit
   (`DEVICE LOST`); `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` with the Intel chip was smooth on a test page but added
   0.5 s hitches to Ivy's intro on this laptop. Worth trying on ordinary Intel/AMD PCs and the proprietary NVIDIA

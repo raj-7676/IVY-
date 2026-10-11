@@ -653,6 +653,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <button
               id="launch-at-startup-toggle"
               role="switch"
+              aria-label="Launch at Startup"
               aria-checked={settings.launchAtStartup}
               onClick={() =>
                 onUpdateSettings({ launchAtStartup: !settings.launchAtStartup })

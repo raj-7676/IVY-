@@ -515,7 +515,7 @@ const StepClipboard: React.FC<{ manualPasteHotkey: string }> = ({ manualPasteHot
           ) : (
             <>
               Ivy never overwrites your clipboard (it might hold a password). It keeps the text and you press{' '}
-              <kbd className="font-mono text-white bg-white/[0.1] px-1 rounded">{keyLabel(manualPasteHotkey)}</kbd> to paste it where you want.
+              <kbd className="font-mono text-white bg-white/[0.1] px-1 rounded whitespace-nowrap">{keyLabel(manualPasteHotkey)}</kbd> to paste it where you want.
             </>
           ),
           window: 'Held by Ivy',

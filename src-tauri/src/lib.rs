@@ -1546,7 +1546,15 @@ fn save_settings(app: tauri::AppHandle, settings: SettingsConfig) -> Result<(), 
 
 #[tauri::command]
 fn get_history(app: tauri::AppHandle) -> Vec<DictationSession> {
-    load_history(&app)
+    #[allow(unused_mut)]
+    let mut sessions = load_history(&app);
+    // Linux: `timestamp` is written once, at save time, so yesterday's dictations still read "Today, 11:35 PM"
+    // (a tester's PC, 2026-10-11). It's worked out again from `created_at` whenever History is read.
+    #[cfg(target_os = "linux")]
+    for s in &mut sessions {
+        s.timestamp = format_timestamp(s.created_at);
+    }
+    sessions
 }
 
 #[tauri::command]
@@ -2802,6 +2810,14 @@ fn extract_audio(app: tauri::AppHandle, id: String) -> Result<String, String> {
     let safe_ts: String = session.timestamp.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect();
+    // Linux: the file carries the recording's date ("2026-10-11 07-55"); the display label made every file
+    // "Today__7_55_AM", for good (a tester's PC, 2026-10-11).
+    #[cfg(target_os = "linux")]
+    let safe_ts = {
+        use chrono::{Local, TimeZone};
+        Local.timestamp_millis_opt(session.created_at).single()
+            .map_or(safe_ts, |dt| dt.format("%Y-%m-%d %H-%M").to_string())
+    };
     let dest = downloads.join(format!("Ivy Recording - {safe_ts} ({}).wav", session.id));
     fs::copy(&session.audio_path, &dest).map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().into_owned())
@@ -4621,7 +4637,15 @@ pub fn run() {
                 let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
                 let separator = PredefinedMenuItem::separator(app)?;
                 let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                #[cfg(not(target_os = "linux"))]
                 let tray_menu = Menu::with_items(app, &[&dictate_item, &pause_item, &settings_item, &separator, &quit_item])?;
+                // Linux: a click on the icon only opens this menu (AppIndicator), so the window gets its own item;
+                // "Settings" was the only way back to it (a tester's PC, 2026-10-11).
+                #[cfg(target_os = "linux")]
+                let open_item = MenuItem::with_id(app, "open", "Open Ivy", true, None::<&str>)?;
+                #[cfg(target_os = "linux")]
+                let tray_menu =
+                    Menu::with_items(app, &[&open_item, &dictate_item, &pause_item, &settings_item, &separator, &quit_item])?;
                 app.manage(PauseMenuItem(pause_item.clone()));
 
                 // `TrayIconBuilder::build` returns a real `TrayIcon` handle
@@ -4669,6 +4693,7 @@ pub fn run() {
                             show_main_window(app.clone());
                             let _ = app.emit("ivy://open-settings", ());
                         }
+                        "open" => show_main_window(app.clone()),
                         "quit" => app.exit(0),
                         _ => {}
                     })
