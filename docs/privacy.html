@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ivy privacy policy</title>
+  <meta name="description" content="Ivy runs entirely on your computer. It has no account, no analytics and no servers, and your voice never leaves your PC.">
+  <meta name="theme-color" content="#0a080e">
+  <link rel="icon" href="ivy-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Syne:wght@800&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #0a080e; --line: rgba(255,255,255,0.08); --text: #efedf2; --muted: #a29dab; --accent: #ff6b00; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 17px/1.7 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+    header { border-bottom: 1px solid var(--line); }
+    header .wrap { height: 68px; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; }
+    header img { height: 28px; width: auto; filter: drop-shadow(0 0 14px rgba(255, 85, 0, 0.4)); }
+    header a.back { color: var(--muted); text-decoration: none; font-size: 15px; }
+    header a.back:hover { color: var(--text); }
+    main { padding: 72px 0 96px; }
+    h1 { font-family: 'Syne', sans-serif; font-weight: 800; font-size: clamp(36px, 6vw, 56px); line-height: 1.05; letter-spacing: -0.02em; margin: 0; }
+    .updated { color: var(--muted); margin: 12px 0 40px; font-size: 15px; }
+    .short { font-size: 20px; padding: 24px 28px; border-radius: 20px; border: 1px solid rgba(255,107,0,0.28); background: rgba(255,107,0,0.08); }
+    h2 { font-size: 21px; margin: 48px 0 8px; }
+    p, li { color: var(--muted); }
+    strong { color: var(--text); font-weight: 600; }
+    ul { padding-left: 22px; }
+    li { margin: 6px 0; }
+    footer { border-top: 1px solid var(--line); padding: 32px 0 48px; color: var(--muted); font-size: 14px; }
+    @media (max-width: 640px) { .wrap { padding: 0 16px; } main { padding: 48px 0 72px; } .short { font-size: 18px; padding: 20px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <a href="./" aria-label="Ivy home"><img src="ivy-wordmark.svg" alt="Ivy" width="99" height="28"></a>
+      <a class="back" href="./">Back to Ivy</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <h1>Privacy policy</h1>
+    <p class="updated">Ivy Dictation, published by Glow.co. Last updated 17 October 2026.</p>
+
+    <p class="short"><strong>Ivy collects nothing.</strong> It has no account, no analytics, no ads and no servers. Your voice and your text stay on your computer.</p>
+
+    <h2>Your voice</h2>
+    <p>When you hold the dictation key, Ivy records from your microphone and turns the recording into text with a speech model that runs on your own computer. The audio is never uploaded anywhere. Once a dictation is done, the audio held in memory is overwritten.</p>
+
+    <h2>What Ivy keeps on your computer</h2>
+    <ul>
+      <li><strong>History:</strong> your recent dictations and their recordings, so you can copy or retry them. They are deleted automatically after 24 hours, or after up to 7 days if you choose that. <strong>Clear all</strong> in History deletes them at once.</li>
+      <li><strong>Settings, personal dictionary and snippets:</strong> the words and shortcuts you add yourself.</li>
+      <li><strong>Stats:</strong> plain numbers such as words dictated and your streak, stored separately from your text.</li>
+    </ul>
+    <p>All of this lives in Ivy's folder on your PC. Nobody else, including us, can see it. Uninstalling the Microsoft Store version removes it; the GitHub setup's uninstaller asks whether to delete it.</p>
+
+    <h2>Internet use</h2>
+    <ul>
+      <li><strong>Microsoft Store version:</strong> the speech model is installed with the app, so Ivy itself does not connect to the internet at all. The Microsoft Store handles updates.</li>
+      <li><strong>Version from GitHub:</strong> on first start Ivy downloads its speech model from Ivy's GitHub releases. After that it goes online only if you press <strong>Check for updates</strong> in Settings, which asks GitHub for the latest version number. GitHub sees a normal web request from your computer, as with any download. Ivy sends nothing about you.</li>
+    </ul>
+
+    <h2>Clipboard</h2>
+    <p>Ivy pastes your text into the app you are typing in by using the clipboard for a moment. Its pastes are marked so they stay out of Windows clipboard history and clipboard cloud sync.</p>
+
+    <h2>Children</h2>
+    <p>Ivy does not collect personal information from anyone, including children.</p>
+
+    <h2>Changes and contact</h2>
+    <p>If this policy changes, the new version will be posted on this page with a new date. Questions or concerns: open an issue on <a href="https://github.com/raj-7676/ivy-dictation/issues">Ivy's GitHub page</a>. For a security problem, please report it privately through <a href="https://github.com/raj-7676/ivy-dictation/security/advisories/new">GitHub security advisories</a>.</p>
+  </main>
+
+  <footer>
+    <div class="wrap">Ivy by Yashvanraj, published by Glow.co. Free to use, source code public, not for sale.</div>
+  </footer>
+</body>
+</html>
