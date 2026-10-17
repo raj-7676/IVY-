@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ivy: offline voice dictation</title>
+  <meta name="description" content="Hold a key, speak, and clean text appears wherever you type. Ivy understands self-corrections and runs fully offline on Windows and Linux. Free.">
+  <meta property="og:title" content="Ivy: offline voice dictation">
+  <meta property="og:description" content="Say “Tuesday, sorry, I mean Thursday” and Ivy types “Thursday”. Fully offline, free, Windows and Linux.">
+  <meta property="og:image" content="https://raj-7676.github.io/ivy-dictation/ivy-main.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a080e;
+      --panel: #14111a;
+      --line: #2a2533;
+      --text: #ececec;
+      --muted: #a39fab;
+      --accent: #ff6b00;
+      --accent-soft: rgba(255, 107, 0, 0.12);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 17px/1.6 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; }
+    img { max-width: 100%; height: auto; display: block; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+    h1, h2 { font-family: 'Syne', sans-serif; letter-spacing: -0.02em; line-height: 1.08; margin: 0; }
+
+    header { padding: 22px 0; }
+    header .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 26px; text-decoration: none; }
+    .logo span { color: var(--accent); }
+    header nav a { color: var(--muted); text-decoration: none; font-size: 15px; margin-left: 22px; }
+    header nav a:hover { color: var(--text); }
+
+    .hero { padding: 64px 0 40px; text-align: center; }
+    .hero h1 { font-size: clamp(40px, 7vw, 76px); font-weight: 800; max-width: 860px; margin: 0 auto; }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero p { color: var(--muted); font-size: clamp(17px, 2.2vw, 20px); max-width: 640px; margin: 22px auto 0; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 34px; }
+    .btn {
+      display: inline-block; padding: 14px 24px; border-radius: 12px; font-weight: 600;
+      text-decoration: none; border: 1px solid var(--line); transition: transform .15s, background .15s;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn.main { background: var(--accent); border-color: var(--accent); color: #140a02; }
+    .btn.main:hover { background: #ff7f22; }
+    .btn.ghost:hover { background: var(--panel); }
+    .small { color: var(--muted); font-size: 14px; margin-top: 16px; }
+
+    .shot { margin: 40px auto 0; border-radius: 16px; overflow: hidden; border: 1px solid var(--line);
+            box-shadow: 0 30px 80px rgba(255, 107, 0, 0.10); }
+
+    section { padding: 72px 0; }
+    section h2 { font-size: clamp(30px, 4.4vw, 44px); font-weight: 700; }
+    section .lead { color: var(--muted); max-width: 620px; margin: 14px 0 0; }
+
+    .say { margin-top: 34px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+    .row:first-child { border-top: 0; }
+    .row div { padding: 18px 22px; }
+    .row .in { color: var(--muted); }
+    .row .out { background: var(--accent-soft); }
+    .row.head div { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 12px 22px; }
+    .row.head .out { color: var(--accent); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px 40px; margin-top: 34px; }
+    .grid p { margin: 0; padding: 16px 0; border-top: 1px solid var(--line); color: var(--muted); }
+    .grid b { color: var(--text); font-weight: 600; display: block; margin-bottom: 2px; }
+
+    .capsule { margin-top: 34px; max-width: 560px; }
+
+    .privacy { background: var(--panel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+    .download { text-align: center; }
+    .download .lead { margin: 14px auto 0; }
+    code {
+      font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 14px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+      padding: 10px 14px; display: inline-block; margin-top: 18px; max-width: 100%; overflow-x: auto; white-space: nowrap;
+    }
+
+    footer { padding: 36px 0 48px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+
+    @media (max-width: 640px) {
+      body { font-size: 16px; }
+      .wrap { padding: 0 16px; }
+      header nav a:not(:last-child) { display: none; }
+      .hero { padding-top: 36px; }
+      section { padding: 52px 0; }
+      .row { grid-template-columns: 1fr; }
+      .row.head { display: none; }
+      .row .in::before { content: "You say: "; color: var(--muted); font-weight: 600; }
+      .row .out::before { content: "Ivy types: "; color: var(--accent); font-weight: 600; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <a class="logo" href="#">Iv<span>y</span></a>
+      <nav>
+        <a href="#how">How it works</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/raj-7676/ivy-dictation">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero wrap">
+      <h1>Talk. Ivy writes what you <em>meant</em>.</h1>
+      <p>Hold a key, speak naturally, let go. Clean text appears wherever your cursor is: email, chat, documents, code. Fully offline. Your voice never leaves your computer.</p>
+      <div class="buttons">
+        <a class="btn main" href="https://github.com/raj-7676/ivy-dictation/releases/latest">Download for Windows</a>
+        <a class="btn ghost" href="https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux">Download for Linux</a>
+      </div>
+      <p class="small">Free. No account, no subscription, no cloud. Runs on any GPU or on the CPU alone.</p>
+      <img class="shot" src="ivy-teaser.webp" width="1920" height="1080" alt="Ivy turning “um, send it Tuesday, no wait, Thursday at 3” into “Send it Thursday at 3 PM.”">
+    </div>
+
+    <section id="how">
+      <div class="wrap">
+        <h2>People change their minds mid-sentence.</h2>
+        <p class="lead">Most dictation apps type every word and leave you to fix it. Ivy understands self-corrections and writes the final version, in one pass, with one small model running on your own PC.</p>
+        <div class="say">
+          <div class="row head"><div class="in">You say</div><div class="out">Ivy types</div></div>
+          <div class="row"><div class="in">“Let’s meet on Tuesday, sorry, I mean Thursday.”</div><div class="out">Let’s meet on Thursday.</div></div>
+          <div class="row"><div class="in">“Book a table for four, actually make it six.”</div><div class="out">Book a table for six.</div></div>
+          <div class="row"><div class="in">“Tell Sam the call is at 3, no wait, 4 PM.”</div><div class="out">Tell Sam the call is at 4 PM.</div></div>
+          <div class="row"><div class="in">“Um, so, I I think we should, uh, ship it.”</div><div class="out">I think we should ship it.</div></div>
+          <div class="row"><div class="in">“It costs 500 rupees.”</div><div class="out">It costs ₹500.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Small app. Does a lot.</h2>
+        <div class="grid">
+          <p><b>Hold to talk, or hands-free</b>Hold Alt + Space and speak, or double-tap to dictate up to 5 minutes.</p>
+          <p><b>Three tones</b>Casual for chat, Standard for normal writing, Professional for formal mail. Set a tone per app and Ivy switches by itself.</p>
+          <p><b>Numbers the way you type them</b>Money, times, dates, ₹500, 2.5 crores, 2 million.</p>
+          <p><b>Personal dictionary and snippets</b>Teach it names and jargon. Say a trigger phrase and Ivy types your saved address or signature.</p>
+          <p><b>Touch Up</b>One click fixes spelling after a paste. It never rewrites your sentences.</p>
+          <p><b>Gets out of the way</b>Sleeps when a game or full-screen video is in front, and moves to the CPU on battery.</p>
+        </div>
+        <img class="capsule" src="ivy-capsule.png" width="1120" height="220" loading="lazy" alt="Ivy’s small dictation bar showing the time, tone and target app">
+      </div>
+    </section>
+
+    <section id="privacy" class="privacy">
+      <div class="wrap">
+        <h2>Offline means offline.</h2>
+        <div class="grid">
+          <p><b>No internet after setup</b>Ivy goes online once, to download its speech model, and after that only when you press Check for updates.</p>
+          <p><b>Deleted on schedule</b>Recordings and transcripts are removed after 24 hours, or up to 7 days if you choose.</p>
+          <p><b>Out of your clipboard history</b>Ivy’s pastes stay out of Win + V history and clipboard cloud sync.</p>
+          <p><b>Source code public</b>Every line is on GitHub, so you can check what it does.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="download">
+      <div class="wrap">
+        <h2>Try it in two minutes.</h2>
+        <p class="lead">Windows 10 and 11, or Linux (.deb and .rpm). Or install on Windows with one PowerShell command:</p>
+        <code>irm https://raw.githubusercontent.com/raj-7676/ivy-dictation/main/install.ps1 | iex</code>
+        <div class="buttons">
+          <a class="btn main" href="https://github.com/raj-7676/ivy-dictation/releases/latest">Download for Windows</a>
+          <a class="btn ghost" href="https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux">Download for Linux</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>Ivy by Yashvanraj. Free to use, source code public, not for sale.</span>
+      <a href="https://github.com/raj-7676/ivy-dictation">github.com/raj-7676/ivy-dictation</a>
+    </div>
+  </footer>
+</body>
+</html>
