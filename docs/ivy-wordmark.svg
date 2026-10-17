@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 16 454 128">
+  <defs>
+    <radialGradient id="ap" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#FFAA66"/><stop offset="60%" stop-color="#FF6B00"/><stop offset="100%" stop-color="#E05300"/></radialGradient>
+    <linearGradient id="ce" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#FF8833"/><stop offset="100%" stop-color="#FF5500"/></linearGradient>
+    <linearGradient id="l" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FFFFFF"/><stop offset="60%" stop-color="#F1F5F9"/><stop offset="100%" stop-color="#CBD5E1"/></linearGradient>
+    <linearGradient id="r" x1="100%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#FFFFFF"/><stop offset="60%" stop-color="#F1F5F9"/><stop offset="100%" stop-color="#CBD5E1"/></linearGradient>
+  </defs>
+  <g stroke="rgba(255,107,0,0.4)" stroke-width="0.8">
+    <polygon points="100,20 145,20 145,40 110,40" fill="url(#l)"/><polygon points="145,20 190,20 180,40 145,40" fill="url(#r)"/>
+    <polygon points="127,40 145,40 145,110 127,110" fill="url(#l)"/><polygon points="145,40 163,40 163,110 145,110" fill="url(#r)"/>
+    <polygon points="110,110 145,110 145,130 100,130" fill="url(#l)"/><polygon points="145,110 180,110 190,130 145,130" fill="url(#r)"/>
+    <polygon points="260,105 300,101 340,105 300,140" fill="url(#ap)" stroke="#FFAA66"/>
+    <polygon points="232,69 266,69 288,105 260,105" fill="url(#l)"/><polygon points="340,105 312,105 334,69 368,69" fill="url(#r)"/>
+    <polygon points="245,20 276,57 300,86 324,57 355,20 300,40" fill="url(#ce)"/>
+    <polygon points="210,20 245,20 266,69 232,69" fill="url(#l)"/><polygon points="334,69 368,69 390,20 355,20" fill="url(#r)"/>
+    <polygon points="448,79 478,62 508,79 478,91" fill="url(#ce)" stroke="#FFAA66"/>
+    <polygon points="410,20 436,20 453,54 428,54" fill="url(#l)"/><polygon points="428,54 453,54 465,79 448,79" fill="url(#l)"/>
+    <polygon points="520,20 546,20 528,54 503,54" fill="url(#r)"/><polygon points="503,54 528,54 508,79 491,79" fill="url(#r)"/>
+    <polygon points="467,87 489,87 493,111 463,111" fill="url(#l)"/><polygon points="463,111 493,111 501,138 455,138" fill="url(#r)"/>
+  </g>
+</svg>

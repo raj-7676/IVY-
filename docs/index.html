@@ -4,24 +4,39 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ivy: offline voice dictation</title>
-  <meta name="description" content="Hold a key, speak, and clean text appears wherever you type. Ivy understands self-corrections and runs fully offline on Windows and Linux. Free.">
-  <meta property="og:title" content="Ivy: offline voice dictation">
+  <meta name="description" content="Hold a key, talk, and clean text appears wherever you type. Ivy understands when you change your mind mid-sentence. Fully offline and free, for Windows and Linux.">
+  <meta name="theme-color" content="#0a080e">
+  <meta property="og:title" content="Ivy: offline voice dictation that writes what you meant">
   <meta property="og:description" content="Say “Tuesday, sorry, I mean Thursday” and Ivy types “Thursday”. Fully offline, free, Windows and Linux.">
-  <meta property="og:image" content="https://raj-7676.github.io/ivy-dictation/ivy-main.png">
+  <meta property="og:image" content="https://raj-7676.github.io/ivy-dictation/ivy-film-poster.webp">
+  <meta property="og:url" content="https://raj-7676.github.io/ivy-dictation/">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="ivy-mark.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Syne:wght@700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
   <style>
+    /* Ivy is a dark-only brand (the app has no light theme), so the page is locked to dark.
+       Shape rule: buttons and chips are full pills, panels are 20px, small insets 12px. */
     :root {
       --bg: #0a080e;
-      --panel: #14111a;
-      --line: #2a2533;
-      --text: #ececec;
-      --muted: #a39fab;
+      --bg-2: #110e16;
+      --panel: #16121c;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-2: rgba(255, 255, 255, 0.14);
+      --text: #efedf2;
+      --muted: #a29dab;
+      --dim: #6f6a78;
       --accent: #ff6b00;
-      --accent-soft: rgba(255, 107, 0, 0.12);
+      --accent-2: #ff8a33;
+      --accent-soft: rgba(255, 107, 0, 0.10);
+      --r-panel: 20px;
+      --r-inset: 12px;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
     }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
@@ -31,166 +46,525 @@
       color: var(--text);
       font: 17px/1.6 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
     a { color: inherit; }
-    img { max-width: 100%; height: auto; display: block; }
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
-    h1, h2 { font-family: 'Syne', sans-serif; letter-spacing: -0.02em; line-height: 1.08; margin: 0; }
+    img, video { max-width: 100%; display: block; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+    h1, h2, h3 { margin: 0; font-weight: 800; }
+    h1, h2 { font-family: 'Syne', sans-serif; letter-spacing: -0.02em; }
+    h2 { font-size: clamp(32px, 4.6vw, 54px); line-height: 1.04; }
+    h2 em, h1 em { font-style: normal; color: var(--accent); }
+    .nw { white-space: nowrap; }
+    .lead { color: var(--muted); font-size: 18px; max-width: 58ch; margin: 16px 0 0; }
+    section { padding: 112px 0; position: relative; }
 
-    header { padding: 22px 0; }
-    header .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-    .logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 26px; text-decoration: none; }
-    .logo span { color: var(--accent); }
-    header nav a { color: var(--muted); text-decoration: none; font-size: 15px; margin-left: 22px; }
-    header nav a:hover { color: var(--text); }
-
-    .hero { padding: 64px 0 40px; text-align: center; }
-    .hero h1 { font-size: clamp(40px, 7vw, 76px); font-weight: 800; max-width: 860px; margin: 0 auto; }
-    .hero h1 em { font-style: normal; color: var(--accent); }
-    .hero p { color: var(--muted); font-size: clamp(17px, 2.2vw, 20px); max-width: 640px; margin: 22px auto 0; }
-    .buttons { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 34px; }
-    .btn {
-      display: inline-block; padding: 14px 24px; border-radius: 12px; font-weight: 600;
-      text-decoration: none; border: 1px solid var(--line); transition: transform .15s, background .15s;
-    }
-    .btn:hover { transform: translateY(-1px); }
-    .btn.main { background: var(--accent); border-color: var(--accent); color: #140a02; }
-    .btn.main:hover { background: #ff7f22; }
-    .btn.ghost:hover { background: var(--panel); }
-    .small { color: var(--muted); font-size: 14px; margin-top: 16px; }
-
-    .shot { margin: 40px auto 0; border-radius: 16px; overflow: hidden; border: 1px solid var(--line);
-            box-shadow: 0 30px 80px rgba(255, 107, 0, 0.10); }
-
-    section { padding: 72px 0; }
-    section h2 { font-size: clamp(30px, 4.4vw, 44px); font-weight: 700; }
-    section .lead { color: var(--muted); max-width: 620px; margin: 14px 0 0; }
-
-    .say { margin-top: 34px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
-    .row:first-child { border-top: 0; }
-    .row div { padding: 18px 22px; }
-    .row .in { color: var(--muted); }
-    .row .out { background: var(--accent-soft); }
-    .row.head div { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 12px 22px; }
-    .row.head .out { color: var(--accent); }
-
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px 40px; margin-top: 34px; }
-    .grid p { margin: 0; padding: 16px 0; border-top: 1px solid var(--line); color: var(--muted); }
-    .grid b { color: var(--text); font-weight: 600; display: block; margin-bottom: 2px; }
-
-    .capsule { margin-top: 34px; max-width: 560px; }
-
-    .privacy { background: var(--panel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-
-    .download { text-align: center; }
-    .download .lead { margin: 14px auto 0; }
-    code {
-      font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 14px;
-      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-      padding: 10px 14px; display: inline-block; margin-top: 18px; max-width: 100%; overflow-x: auto; white-space: nowrap;
+    /* Warm glow behind the hero and film, like the app's own backdrop. */
+    .glow::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none; z-index: -1;
+      background: radial-gradient(600px 380px at 70% 40%, rgba(255, 107, 0, 0.13), transparent 70%);
     }
 
-    footer { padding: 36px 0 48px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
-    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+    /* Nav */
+    .nav { position: sticky; top: 0; z-index: 20; background: rgba(10, 8, 14, 0.72);
+           backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid transparent;
+           transition: border-color .3s; }
+    .nav.scrolled { border-bottom-color: var(--line); }
+    .nav .wrap { height: 68px; display: flex; align-items: center; gap: 32px; }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    /* Same treatment as the app's sidebar wordmark. */
+    .brand .word { height: 28px; width: auto; filter: drop-shadow(0 0 14px rgba(255, 85, 0, 0.4)) drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6)); }
+    footer .brand .word { height: 24px; }
+    .nav nav { display: flex; gap: 28px; margin-left: auto; }
+    .nav nav a { color: var(--muted); text-decoration: none; font-size: 15px; font-weight: 500; transition: color .2s; }
+    .nav nav a:hover { color: var(--text); }
 
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 24px; border-radius: 999px;
+           font-weight: 600; font-size: 16px; text-decoration: none; white-space: nowrap; border: 1px solid var(--line-2);
+           transition: transform .2s var(--ease), background .2s, border-color .2s, box-shadow .2s; }
+    .btn i { font-size: 20px; }
+    .btn:active { transform: scale(0.98); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #160a00;
+                   box-shadow: 0 8px 30px rgba(255, 107, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+    .btn.primary:hover { background: var(--accent-2); transform: translateY(-1px); }
+    .btn.ghost { background: rgba(255, 255, 255, 0.03); color: var(--text); }
+    .btn.ghost:hover { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.24); }
+    .btn.small { padding: 9px 18px; font-size: 14px; }
+    .btn.small i { font-size: 17px; }
+    .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+
+    /* Hero */
+    .hero { padding: 88px 0 120px; }
+    .hero .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; width: 100%; }
+    .hero h1 { font-size: clamp(46px, 5.2vw, 76px); line-height: 1.02; }
+    .hero .lead { font-size: 19px; margin-bottom: 36px; max-width: 30em; }
+
+    /* Live demo: a real, scripted copy of what Ivy does, not a screenshot. */
+    .demo { position: relative; border-radius: var(--r-panel); border: 1px solid var(--line-2);
+            background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), var(--bg-2);
+            box-shadow: 0 40px 100px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 107, 0, 0.05), inset 0 1px 0 rgba(255,255,255,0.06);
+            padding: 22px; }
+    .demo-row { display: grid; grid-template-columns: 92px 1fr; align-items: start; gap: 14px; padding: 18px 16px;
+                border-radius: var(--r-inset); }
+    .demo-row + .demo-row { margin-top: 10px; }
+    .demo-row.said { background: rgba(255, 255, 255, 0.025); border: 1px solid var(--line); }
+    .demo-row.typed { background: var(--accent-soft); border: 1px solid rgba(255, 107, 0, 0.28); }
+    .tag { font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); padding-top: 7px; }
+    .typed .tag { color: var(--accent-2); }
+    .said-text { font-size: 19px; color: #d9d5df; min-height: 62px; line-height: 1.6; }
+    .said-text span { opacity: 0; transition: opacity .25s, color .4s; }
+    .said-text span.on { opacity: 1; }
+    .said-text span.drop { color: var(--dim); text-decoration: line-through; text-decoration-color: var(--accent);
+                           text-decoration-thickness: 2px; }
+    .typed-text { font-size: 21px; font-weight: 600; min-height: 34px; line-height: 1.5; }
+    .typed-text b { color: var(--accent-2); font-weight: 700; }
+    .caret { display: inline-block; width: 2px; height: 1.05em; background: var(--accent); vertical-align: -2px; margin-left: 2px;
+             animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .demo-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; }
+    .capsule { display: inline-flex; align-items: center; gap: 12px; padding: 8px 16px 8px 10px; border-radius: 999px;
+               background: #0d0b11; border: 1px solid rgba(255, 107, 0, 0.35); font-size: 13px; color: var(--muted); }
+    .capsule .rec { width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center;
+                    background: var(--accent-soft); color: var(--accent); font-size: 14px; }
+    .bars { display: inline-flex; align-items: center; gap: 2px; height: 18px; }
+    .bars i { width: 2px; border-radius: 2px; background: var(--accent); height: 30%; opacity: .5; transition: height .12s; }
+    .capsule.live .bars i { opacity: 1; }
+    .app { font: 500 12px var(--mono); color: var(--dim); }
+    .dots { display: flex; gap: 6px; }
+    .dots b { width: 6px; height: 6px; border-radius: 999px; background: var(--line-2); transition: background .3s, width .3s; }
+    .dots b.on { background: var(--accent); width: 18px; }
+
+    /* Film */
+    .film { padding-top: 40px; }
+    .film-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 36px; }
+    .player { position: relative; border-radius: var(--r-panel); overflow: hidden; border: 1px solid var(--line-2);
+              background: #000; aspect-ratio: 16 / 9; box-shadow: 0 40px 120px rgba(255, 107, 0, 0.08); }
+    .player video { width: 100%; height: 100%; object-fit: cover; }
+    .play { position: absolute; inset: 0; display: grid; place-items: end start; padding: 0 0 28px 28px;
+            background: linear-gradient(180deg, transparent 60%, rgba(10, 8, 14, 0.55));
+            border: 0; cursor: pointer; color: var(--text); transition: background .3s; }
+    .play span { display: inline-flex; align-items: center; gap: 12px; padding: 16px 26px 16px 18px; border-radius: 999px;
+                 background: rgba(10, 8, 14, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+                 border: 1px solid var(--line-2); font-weight: 600; transition: transform .3s var(--ease); }
+    .play span i { width: 40px; height: 40px; border-radius: 999px; background: var(--accent); color: #160a00;
+                   display: grid; place-items: center; font-size: 18px; }
+    .play:hover span { transform: scale(1.04); }
+    .player.playing .play { display: none; }
+
+    /* Corrections */
+    .fixes { margin-top: 56px; display: grid; gap: 4px; }
+    .fix { display: grid; grid-template-columns: 1.25fr auto 1fr; align-items: center; gap: 28px; padding: 26px 0;
+           border-top: 1px solid var(--line); }
+    .fix:last-child { border-bottom: 1px solid var(--line); }
+    .fix .in { color: var(--muted); font-size: 19px; }
+    .fix .in s { color: var(--dim); text-decoration-color: var(--accent); text-decoration-thickness: 2px; }
+    .fix .arrow { color: var(--accent); font-size: 22px; }
+    .fix .out { font-size: 22px; font-weight: 600; }
+
+    /* Bento */
+    .bento { margin-top: 56px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .cell { position: relative; border-radius: var(--r-panel); border: 1px solid var(--line); background: var(--panel);
+            padding: 30px; overflow: hidden; transition: border-color .3s, transform .4s var(--ease); }
+    .cell:hover { border-color: var(--line-2); transform: translateY(-2px); }
+    .cell h3 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+    .cell p { color: var(--muted); margin: 8px 0 0; font-size: 15.5px; max-width: 40ch; }
+    .cell .ico { font-size: 26px; color: var(--accent); margin-bottom: 18px; display: block; }
+    .cell.tones { grid-column: span 2; grid-row: span 2; display: flex; flex-direction: column;
+                  background: radial-gradient(500px 300px at 85% 0%, rgba(255, 107, 0, 0.14), transparent 70%), var(--panel); }
+    .tone-list { margin-top: auto; padding-top: 28px; display: grid; gap: 10px; }
+    .tone { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 16px; padding: 16px 18px;
+            border-radius: var(--r-inset); background: rgba(10, 8, 14, 0.55); border: 1px solid var(--line); }
+    .tone .chip { justify-self: start; }
+    .tone p { margin: 0; max-width: none; color: var(--text); font-size: 16px; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-size: 13px;
+            border: 1px solid var(--line-2); color: var(--muted); }
+    .chip b { color: var(--accent-2); font-weight: 600; }
+    .cell.nums { background: linear-gradient(160deg, rgba(255, 107, 0, 0.16), rgba(255, 107, 0, 0.02) 60%), var(--panel); }
+    .big { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 38px; line-height: 1.05; margin: 14px 0 6px; letter-spacing: -0.02em; }
+    .big em { font-style: normal; color: var(--accent); }
+    .from { font: 500 13px var(--mono); color: var(--dim); text-decoration: line-through; text-decoration-color: rgba(255,107,0,.6); }
+    .keys { display: flex; align-items: center; gap: 8px; margin: 4px 0 18px; }
+    .key { font: 500 14px var(--mono); padding: 8px 14px; border-radius: 10px; background: #0d0b11;
+           border: 1px solid var(--line-2); box-shadow: inset 0 -2px 0 rgba(255,255,255,0.06); }
+    .keys span { color: var(--dim); }
+
+    /* Privacy */
+    .private { background: var(--bg-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .private .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: start; }
+    .private h2 { font-size: clamp(48px, 7vw, 96px); line-height: 0.95; }
+    .promises { display: grid; gap: 0; }
+    .promise { display: grid; grid-template-columns: 40px 1fr; gap: 16px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+    .promise:first-child { padding-top: 6px; }
+    .promise i { font-size: 24px; color: var(--accent); margin-top: 2px; }
+    .promise b { display: block; font-weight: 600; font-size: 17px; }
+    .promise span { color: var(--muted); font-size: 15.5px; }
+
+    /* Under the hood */
+    .stats { margin-top: 56px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); }
+    .stat { padding: 32px 24px 0 0; }
+    .stat + .stat { padding-left: 24px; border-left: 1px solid var(--line); }
+    .stat .n { font-family: 'Syne', sans-serif; font-weight: 800; font-size: clamp(36px, 4vw, 54px); line-height: 1; letter-spacing: -0.02em; }
+    .stat .n small { font-size: 0.45em; color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+    .stat p { color: var(--muted); font-size: 15px; margin: 12px 0 0; max-width: 24ch; }
+    .stack { margin-top: 48px; display: flex; flex-wrap: wrap; gap: 10px; }
+
+    /* Download */
+    .get { text-align: center; padding-bottom: 128px; }
+    .get .mark { width: 76px; margin: 0 auto 30px; filter: drop-shadow(0 0 26px rgba(255, 85, 0, 0.5)); }
+    .get h2 { font-size: clamp(40px, 6vw, 72px); }
+    .get .lead { margin: 18px auto 36px; }
+    .get .ctas { justify-content: center; }
+    .cmd { margin: 40px auto 0; max-width: 720px; display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 20px;
+           border-radius: 999px; background: var(--panel); border: 1px solid var(--line-2); text-align: left; }
+    .cmd code { font: 500 13.5px var(--mono); color: #d9d5df; overflow-x: auto; white-space: nowrap; flex: 1; scrollbar-width: none; }
+    .cmd code::-webkit-scrollbar { display: none; }
+    .cmd code span { color: var(--accent-2); }
+    .copy { flex: none; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); background: transparent;
+            color: var(--text); font: 600 13px 'Plus Jakarta Sans', sans-serif; padding: 9px 14px; border-radius: 999px; cursor: pointer;
+            transition: background .2s; }
+    .copy:hover { background: rgba(255,255,255,0.06); }
+    .cmd-note { color: var(--dim); font-size: 14px; margin-top: 14px; }
+
+    footer { border-top: 1px solid var(--line); padding: 40px 0 56px; color: var(--muted); font-size: 14px; }
+    footer .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; }
+    footer .links { display: flex; gap: 24px; }
+    footer .links a { text-decoration: none; }
+    footer .links a:hover { color: var(--text); }
+
+    /* Scroll reveal (IntersectionObserver adds .in). */
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity .8s var(--ease), transform .8s var(--ease);
+              transition-delay: calc(var(--i, 0) * 70ms); }
+    .reveal.in { opacity: 1; transform: none; }
+
+    a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+      .caret { animation: none; }
+      .cell, .btn, .play span { transition: none; }
+    }
+
+    @media (max-width: 960px) {
+      .hero { padding-top: 48px; }
+      .hero .wrap { grid-template-columns: 1fr; gap: 48px; }
+      .bento { grid-template-columns: 1fr 1fr; }
+      .cell.tones { grid-column: span 2; grid-row: auto; }
+      .private .wrap { grid-template-columns: 1fr; gap: 40px; }
+      .stats { grid-template-columns: 1fr 1fr; }
+      .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+      .stat:nth-child(n+3) { padding-top: 40px; }
+    }
     @media (max-width: 640px) {
       body { font-size: 16px; }
+      .nw { white-space: normal; }
       .wrap { padding: 0 16px; }
-      header nav a:not(:last-child) { display: none; }
-      .hero { padding-top: 36px; }
-      section { padding: 52px 0; }
-      .row { grid-template-columns: 1fr; }
-      .row.head { display: none; }
-      .row .in::before { content: "You say: "; color: var(--muted); font-weight: 600; }
-      .row .out::before { content: "Ivy types: "; color: var(--accent); font-weight: 600; }
+      section { padding: 80px 0; }
+      .nav nav a:not(.gh) { display: none; }
+      .nav .wrap { gap: 16px; }
+      .nav .btn.small { display: none; }
+      .hero h1 { font-size: 46px; }
+      .ctas .btn { flex: 1 1 100%; justify-content: center; }
+      .demo { padding: 14px; }
+      .demo-row { grid-template-columns: 1fr; gap: 6px; padding: 14px; }
+      .tag { padding-top: 0; }
+      .said-text { font-size: 17px; min-height: 84px; }
+      .typed-text { font-size: 18px; }
+      .film-head { flex-direction: column; align-items: start; }
+      .play { padding: 0 0 12px 12px; }
+      .play span { padding: 8px 14px 8px 8px; font-size: 14px; }
+      .play span i { width: 30px; height: 30px; font-size: 14px; }
+      .fix { grid-template-columns: 1fr; gap: 8px; padding: 22px 0; }
+      .fix .arrow { transform: rotate(90deg); width: max-content; }
+      .bento { grid-template-columns: 1fr; }
+      .cell.tones { grid-column: auto; }
+      .tone { grid-template-columns: 1fr; gap: 10px; }
+      .stats { grid-template-columns: 1fr; }
+      .stat, .stat + .stat { padding: 28px 0 0; border-left: 0; }
+      .stat:nth-child(n+2) { margin-top: 28px; border-top: 1px solid var(--line); }
+      .cmd { border-radius: var(--r-panel); flex-direction: column; align-items: stretch; padding: 16px; }
+      .copy { justify-content: center; }
+      footer .wrap { flex-direction: column; align-items: start; }
     }
   </style>
 </head>
 <body>
-  <header>
+  <header class="nav" id="nav">
     <div class="wrap">
-      <a class="logo" href="#">Iv<span>y</span></a>
-      <nav>
+      <a class="brand" href="#" aria-label="Ivy home">
+        <img class="word" src="ivy-wordmark.svg" alt="Ivy" width="99" height="28">
+      </a>
+      <nav aria-label="Main">
         <a href="#how">How it works</a>
-        <a href="#privacy">Privacy</a>
-        <a href="https://github.com/raj-7676/ivy-dictation">GitHub</a>
+        <a href="#private">Privacy</a>
+        <a href="#hood">Under the hood</a>
+        <a class="gh" href="https://github.com/raj-7676/ivy-dictation">GitHub</a>
       </nav>
+      <a class="btn primary small" href="#download"><i class="ph ph-download-simple"></i>Download</a>
     </div>
   </header>
 
   <main>
-    <div class="hero wrap">
-      <h1>Talk. Ivy writes what you <em>meant</em>.</h1>
-      <p>Hold a key, speak naturally, let go. Clean text appears wherever your cursor is: email, chat, documents, code. Fully offline. Your voice never leaves your computer.</p>
-      <div class="buttons">
-        <a class="btn main" href="https://github.com/raj-7676/ivy-dictation/releases/latest">Download for Windows</a>
-        <a class="btn ghost" href="https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux">Download for Linux</a>
+    <section class="hero glow">
+      <div class="wrap">
+        <div>
+          <h1 class="reveal">You talk.<br><em>It types.</em></h1>
+          <p class="lead reveal" style="--i:1">Offline dictation that writes what you meant, even when you change your mind mid-sentence. Free, private, and fast on any PC.</p>
+          <div class="ctas reveal" style="--i:2">
+            <a class="btn primary" href="https://github.com/raj-7676/ivy-dictation/releases/latest"><i class="ph-fill ph-windows-logo"></i>Download for Windows</a>
+            <a class="btn ghost" href="https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux"><i class="ph-fill ph-linux-logo"></i>Download for Linux</a>
+          </div>
+        </div>
+
+        <div class="demo reveal" style="--i:2" aria-label="Example: what you say and what Ivy types">
+          <div class="demo-row said">
+            <div class="tag">You say</div>
+            <div class="said-text" id="said" aria-live="off"></div>
+          </div>
+          <div class="demo-row typed">
+            <div class="tag">Ivy types</div>
+            <div class="typed-text"><span id="typed"></span><span class="caret"></span></div>
+          </div>
+          <div class="demo-foot">
+            <div class="capsule" id="capsule">
+              <span class="rec"><i class="ph-fill ph-microphone"></i></span>
+              <span id="state">Listening</span>
+              <span class="bars" id="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="app" id="app">Slack</span>
+            </div>
+            <div class="dots" id="dots"><b class="on"></b><b></b><b></b></div>
+          </div>
+        </div>
       </div>
-      <p class="small">Free. No account, no subscription, no cloud. Runs on any GPU or on the CPU alone.</p>
-      <img class="shot" src="ivy-teaser.webp" width="1920" height="1080" alt="Ivy turning “um, send it Tuesday, no wait, Thursday at 3” into “Send it Thursday at 3 PM.”">
-    </div>
+    </section>
+
+    <section class="film">
+      <div class="wrap">
+        <div class="film-head">
+          <h2 class="reveal">See it <em>work.</em></h2>
+          <p class="lead reveal" style="--i:1;margin:0;max-width:34ch">Hold a key, talk, let go. Clean text lands in whatever app you were typing in.</p>
+        </div>
+        <div class="player reveal" id="player">
+          <video id="film" preload="none" poster="ivy-film-poster.webp" playsinline>
+            <source src="ivy-film.mp4" type="video/mp4">
+          </video>
+          <button class="play" id="play" aria-label="Play the Ivy film"><span><i class="ph-fill ph-play"></i>Watch the film</span></button>
+        </div>
+      </div>
+    </section>
 
     <section id="how">
       <div class="wrap">
-        <h2>People change their minds mid-sentence.</h2>
-        <p class="lead">Most dictation apps type every word and leave you to fix it. Ivy understands self-corrections and writes the final version, in one pass, with one small model running on your own PC.</p>
-        <div class="say">
-          <div class="row head"><div class="in">You say</div><div class="out">Ivy types</div></div>
-          <div class="row"><div class="in">“Let’s meet on Tuesday, sorry, I mean Thursday.”</div><div class="out">Let’s meet on Thursday.</div></div>
-          <div class="row"><div class="in">“Book a table for four, actually make it six.”</div><div class="out">Book a table for six.</div></div>
-          <div class="row"><div class="in">“Tell Sam the call is at 3, no wait, 4 PM.”</div><div class="out">Tell Sam the call is at 4 PM.</div></div>
-          <div class="row"><div class="in">“Um, so, I I think we should, uh, ship it.”</div><div class="out">I think we should ship it.</div></div>
-          <div class="row"><div class="in">“It costs 500 rupees.”</div><div class="out">It costs ₹500.</div></div>
+        <h2 class="reveal">Changed your mind <em class="nw">mid-sentence?</em></h2>
+        <p class="lead reveal" style="--i:1">Most dictation apps type every word and leave the cleanup to you. Ivy's speech model hears you and writes the final version in one pass.</p>
+        <div class="fixes">
+          <div class="fix reveal"><div class="in">“Let’s meet on <s>Tuesday, sorry, I mean</s> Thursday.”</div><i class="ph ph-arrow-right arrow"></i><div class="out">Let’s meet on Thursday.</div></div>
+          <div class="fix reveal" style="--i:1"><div class="in">“Book a table for <s>four, actually make it</s> six.”</div><i class="ph ph-arrow-right arrow"></i><div class="out">Book a table for six.</div></div>
+          <div class="fix reveal" style="--i:2"><div class="in">“Tell Sam the call is at <s>3, no wait,</s> 4 PM.”</div><i class="ph ph-arrow-right arrow"></i><div class="out">Tell Sam the call is at 4 PM.</div></div>
+          <div class="fix reveal" style="--i:3"><div class="in">“<s>Um, so, I</s> I think we should, <s>uh,</s> ship it.”</div><i class="ph ph-arrow-right arrow"></i><div class="out">I think we should ship it.</div></div>
         </div>
       </div>
     </section>
 
     <section>
       <div class="wrap">
-        <h2>Small app. Does a lot.</h2>
-        <div class="grid">
-          <p><b>Hold to talk, or hands-free</b>Hold Alt + Space and speak, or double-tap to dictate up to 5 minutes.</p>
-          <p><b>Three tones</b>Casual for chat, Standard for normal writing, Professional for formal mail. Set a tone per app and Ivy switches by itself.</p>
-          <p><b>Numbers the way you type them</b>Money, times, dates, ₹500, 2.5 crores, 2 million.</p>
-          <p><b>Personal dictionary and snippets</b>Teach it names and jargon. Say a trigger phrase and Ivy types your saved address or signature.</p>
-          <p><b>Touch Up</b>One click fixes spelling after a paste. It never rewrites your sentences.</p>
-          <p><b>Gets out of the way</b>Sleeps when a game or full-screen video is in front, and moves to the CPU on battery.</p>
+        <h2 class="reveal">Built for how people <em>actually</em> talk.</h2>
+        <div class="bento">
+          <div class="cell tones reveal">
+            <i class="ph ph-sliders-horizontal ico"></i>
+            <h3>The right tone in every app</h3>
+            <p>Casual for chats, Standard for everyday writing, Professional for formal mail. Pick a tone per app and Ivy switches by itself.</p>
+            <div class="tone-list">
+              <div class="tone"><span class="chip">Slack <b>Casual</b></span><p>Yeah, I'm gonna push that fix before standup<br>Thanks!</p></div>
+              <div class="tone"><span class="chip">Notion <b>Standard</b></span><p>Yeah, I'm going to push that fix before standup. Thanks!</p></div>
+              <div class="tone"><span class="chip">Outlook <b>Professional</b></span><p>Yes, I am going to push that fix before standup. Thank you.</p></div>
+            </div>
+          </div>
+          <div class="cell nums reveal" style="--i:1">
+            <h3>Numbers, typed right</h3>
+            <div class="big">₹500 at <em style="white-space:nowrap">3 PM</em></div>
+            <div class="from">five hundred rupees at three pm</div>
+            <p>Money, times and dates the way you'd type them. Big amounts read as 18 lakhs, 2.5 crores or 2 million.</p>
+          </div>
+          <div class="cell reveal" style="--i:2">
+            <i class="ph ph-keyboard ico"></i>
+            <h3>Hold to talk</h3>
+            <div class="keys"><span class="key">Alt</span><span>+</span><span class="key">Space</span></div>
+            <p>Or double-tap for hands-free dictation up to 5 minutes.</p>
+          </div>
+          <div class="cell reveal">
+            <i class="ph ph-book-open-text ico"></i>
+            <h3>Your words, your spelling</h3>
+            <p>Teach it names and jargon. Say a snippet trigger and your saved address or signature appears.</p>
+          </div>
+          <div class="cell reveal" style="--i:1">
+            <i class="ph ph-magic-wand ico"></i>
+            <h3>Touch Up</h3>
+            <p>One click after a paste fixes spelling. It never rewrites your sentences.</p>
+          </div>
+          <div class="cell reveal" style="--i:2">
+            <i class="ph ph-game-controller ico"></i>
+            <h3>Polite with your PC</h3>
+            <p>Sleeps while you game or watch full-screen video. Moves to the CPU on battery.</p>
+          </div>
         </div>
-        <img class="capsule" src="ivy-capsule.png" width="1120" height="220" loading="lazy" alt="Ivy’s small dictation bar showing the time, tone and target app">
       </div>
     </section>
 
-    <section id="privacy" class="privacy">
+    <section class="private" id="private">
       <div class="wrap">
-        <h2>Offline means offline.</h2>
-        <div class="grid">
-          <p><b>No internet after setup</b>Ivy goes online once, to download its speech model, and after that only when you press Check for updates.</p>
-          <p><b>Deleted on schedule</b>Recordings and transcripts are removed after 24 hours, or up to 7 days if you choose.</p>
-          <p><b>Out of your clipboard history</b>Ivy’s pastes stay out of Win + V history and clipboard cloud sync.</p>
-          <p><b>Source code public</b>Every line is on GitHub, so you can check what it does.</p>
+        <div>
+          <h2 class="reveal">100% <em>offline.</em></h2>
+          <p class="lead reveal" style="--i:1">Your voice never leaves your computer. No account, no subscription, no servers listening.</p>
+        </div>
+        <div class="promises">
+          <div class="promise reveal"><i class="ph ph-wifi-slash"></i><div><b>No internet after setup</b><span>Ivy downloads its speech model once. After that it only goes online if you press Check for updates.</span></div></div>
+          <div class="promise reveal" style="--i:1"><i class="ph ph-clock-counter-clockwise"></i><div><b>History deletes itself</b><span>Recordings and transcripts are removed after 24 hours, or up to 7 days if you choose.</span></div></div>
+          <div class="promise reveal" style="--i:2"><i class="ph ph-clipboard-text"></i><div><b>Kept out of clipboard history</b><span>Ivy's pastes skip Win + V history and clipboard cloud sync.</span></div></div>
+          <div class="promise reveal" style="--i:3"><i class="ph ph-code"></i><div><b>Every line is public</b><span>The full source code is on GitHub, so anyone can check what Ivy does.</span></div></div>
         </div>
       </div>
     </section>
 
-    <section class="download">
+    <section id="hood">
       <div class="wrap">
-        <h2>Try it in two minutes.</h2>
-        <p class="lead">Windows 10 and 11, or Linux (.deb and .rpm). Or install on Windows with one PowerShell command:</p>
-        <code>irm https://raw.githubusercontent.com/raj-7676/ivy-dictation/main/install.ps1 | iex</code>
-        <div class="buttons">
-          <a class="btn main" href="https://github.com/raj-7676/ivy-dictation/releases/latest">Download for Windows</a>
-          <a class="btn ghost" href="https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux">Download for Linux</a>
+        <h2 class="reveal">One small model. <em>No cloud.</em></h2>
+        <p class="lead reveal" style="--i:1">Ivy runs a fine-tune of Qwen3-ASR-1.7B through llama.cpp on your own hardware. It hears and cleans up in a single pass, with no second AI rewriting your words.</p>
+        <div class="stats">
+          <div class="stat reveal"><div class="n">1.7B</div><p>parameters, fine-tuned on real human speech and dictation paragraphs</p></div>
+          <div class="stat reveal" style="--i:1"><div class="n">0.33<small>s</small></div><p>to write a 15-second dictation on a GPU (any Vulkan card)</p></div>
+          <div class="stat reveal" style="--i:2"><div class="n">3.2<small>s</small></div><p>for the same dictation on the CPU alone</p></div>
+          <div class="stat reveal" style="--i:3"><div class="n">0<small>bytes</small></div><p>of your audio sent anywhere, ever</p></div>
         </div>
+        <div class="stack reveal">
+          <span class="chip">Rust + Tauri</span>
+          <span class="chip">llama.cpp with Vulkan</span>
+          <span class="chip">Qwen3-ASR-1.7B fine-tune</span>
+          <span class="chip">NVIDIA, AMD, Intel or CPU</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="get" id="download">
+      <div class="wrap">
+        <img class="mark reveal" src="ivy-mark.svg" alt="" width="76" height="64">
+        <h2 class="reveal">Try Ivy <em>today.</em></h2>
+        <p class="lead reveal" style="--i:1">Windows 10 and 11, or Linux (.deb and .rpm). Free to use, forever.</p>
+        <div class="ctas reveal" style="--i:2">
+          <a class="btn primary" href="https://github.com/raj-7676/ivy-dictation/releases/latest"><i class="ph-fill ph-windows-logo"></i>Download for Windows</a>
+          <a class="btn ghost" href="https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux"><i class="ph-fill ph-linux-logo"></i>Download for Linux</a>
+        </div>
+        <div class="cmd reveal" style="--i:3">
+          <code id="cmd"><span>irm</span> https://raw.githubusercontent.com/raj-7676/ivy-dictation/main/install.ps1 <span>| iex</span></code>
+          <button class="copy" id="copy" type="button"><i class="ph ph-copy"></i><span>Copy</span></button>
+        </div>
+        <p class="cmd-note reveal">Or install on Windows from PowerShell with one command.</p>
       </div>
     </section>
   </main>
 
   <footer>
     <div class="wrap">
-      <span>Ivy by Yashvanraj. Free to use, source code public, not for sale.</span>
-      <a href="https://github.com/raj-7676/ivy-dictation">github.com/raj-7676/ivy-dictation</a>
+      <a class="brand" href="#" aria-label="Ivy home">
+        <img class="word" src="ivy-wordmark.svg" alt="Ivy" width="85" height="24">
+      </a>
+      <span>By Yashvanraj. Free to use, source code public, not for sale.</span>
+      <div class="links">
+        <a href="https://github.com/raj-7676/ivy-dictation">GitHub</a>
+        <a href="https://github.com/raj-7676/ivy-dictation/blob/main/LICENSE">License</a>
+        <a href="https://github.com/raj-7676/ivy-dictation/blob/main/SECURITY.md">Security</a>
+      </div>
     </div>
   </footer>
+
+  <script>
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Nav border once the page scrolls (observer on a sentinel, no scroll listener).
+    const sentinel = document.createElement('div');
+    sentinel.style.cssText = 'position:absolute;top:8px;height:1px;width:1px';
+    document.body.prepend(sentinel);
+    new IntersectionObserver(([e]) => document.getElementById('nav').classList.toggle('scrolled', !e.isIntersecting)).observe(sentinel);
+
+    // Scroll reveal.
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }),
+      { rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+    // Film: poster with a play button, real controls once playing.
+    const film = document.getElementById('film');
+    document.getElementById('play').addEventListener('click', () => {
+      document.getElementById('player').classList.add('playing');
+      film.controls = true;
+      film.play();
+    });
+
+    // Copy the install command.
+    document.getElementById('copy').addEventListener('click', async e => {
+      const label = e.currentTarget.querySelector('span');
+      try { await navigator.clipboard.writeText(document.getElementById('cmd').textContent); label.textContent = 'Copied'; }
+      catch { label.textContent = 'Select it'; }
+      setTimeout(() => label.textContent = 'Copy', 1800);
+    });
+
+    // Hero demo. Each part of what is said is kept (k) or dropped (d); out marks highlighted words with *.
+    const demos = [
+      { app: 'Slack', said: [['d', 'Um,'], ['k', 'send it'], ['d', 'Tuesday, no wait,'], ['k', 'Thursday at 3']], out: 'Send it *Thursday* at *3 PM*.' },
+      { app: 'WhatsApp', said: [['k', 'Book a table for'], ['d', 'four, actually make it'], ['k', 'six']], out: 'Book a table for *six*.' },
+      { app: 'Gmail', said: [['k', 'Let’s meet on'], ['d', 'Tuesday, sorry, I mean'], ['k', 'Thursday']], out: 'Let’s meet on *Thursday*.' },
+    ];
+    const $ = id => document.getElementById(id);
+    const said = $('said'), typed = $('typed'), cap = $('capsule'), state = $('state'), dots = [...$('dots').children];
+    const bars = [...$('bars').children];
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const html = s => s.replace(/\*(.+?)\*/g, '<b>$1</b>');
+    let talking = false;
+
+    (function wave() {
+      bars.forEach(b => b.style.height = talking ? (25 + Math.random() * 75) + '%' : '30%');
+      if (!reduce) setTimeout(wave, 110);
+    })();
+
+    function build(d) {
+      said.innerHTML = '';
+      d.said.forEach(([kind, text]) => text.split(' ').forEach(w => {
+        const s = document.createElement('span');
+        s.textContent = w + ' ';
+        s.className = kind === 'd' ? 'x' : 'keep';
+        said.appendChild(s);
+      }));
+      $('app').textContent = d.app;
+    }
+
+    function showFinal(d, i) {
+      build(d);
+      said.querySelectorAll('span').forEach(s => { s.classList.add('on'); if (s.className.includes('x')) s.classList.add('drop'); });
+      typed.innerHTML = html(d.out);
+      dots.forEach((b, j) => b.classList.toggle('on', j === i));
+    }
+
+    async function run() {
+      for (let i = 0; ; i = (i + 1) % demos.length) {
+        const d = demos[i];
+        dots.forEach((b, j) => b.classList.toggle('on', j === i));
+        typed.textContent = '';
+        build(d);
+        talking = true; cap.classList.add('live'); state.textContent = 'Listening';
+        for (const s of said.querySelectorAll('span')) { s.classList.add('on'); await wait(230); }
+        talking = false; cap.classList.remove('live'); state.textContent = 'Writing';
+        await wait(450);
+        said.querySelectorAll('.x').forEach(s => s.classList.add('drop'));
+        await wait(650);
+        const plain = d.out.replace(/\*/g, '');
+        for (let c = 1; c <= plain.length; c++) { typed.textContent = plain.slice(0, c); await wait(32); }
+        typed.innerHTML = html(d.out);
+        state.textContent = 'Pasted';
+        await wait(2600);
+      }
+    }
+
+    if (reduce) { showFinal(demos[0], 0); state.textContent = 'Pasted'; } else { run(); }
+  </script>
 </body>
 </html>
