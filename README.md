@@ -8,9 +8,9 @@ into whatever you were typing in: email, chat, documents, code editors, browsers
 Everything happens on your own computer. No account, no subscription, no internet connection, no
 cloud. Your voice never leaves your PC.
 
-**[Download Ivy for Windows](https://github.com/raj-7676/IVY-/releases/latest)**
+**[Download Ivy for Windows](https://github.com/raj-7676/ivy-dictation/releases/latest)**
 
-**[Download Ivy for Linux](https://github.com/raj-7676/IVY-/releases/tag/v0.2.8-linux)** ([install steps](#linux))
+**[Download Ivy for Linux](https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux)** ([install steps](#linux))
 
 ![Ivy turning "um, send it Tuesday, no wait, Thursday at 3" into "Send it Thursday at 3 PM."](docs/ivy-teaser.webp)
 
@@ -93,7 +93,7 @@ Pick one of the two ways. Both install the same Ivy.
 Open **PowerShell** (press Start, type `PowerShell`, press Enter), paste this and press Enter:
 
 ```powershell
-irm https://raw.githubusercontent.com/raj-7676/IVY-/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/raj-7676/ivy-dictation/main/install.ps1 | iex
 ```
 
 It downloads the latest setup file from this page's releases, checks it against its published checksum,
@@ -102,7 +102,7 @@ nothing anywhere.
 
 ### Option 2: download the setup file
 
-1. From the **[latest release](https://github.com/raj-7676/IVY-/releases/latest)**, download `Ivy_<version>_x64-setup.exe` and run it.
+1. From the **[latest release](https://github.com/raj-7676/ivy-dictation/releases/latest)**, download `Ivy_<version>_x64-setup.exe` and run it.
 2. Ivy opens and downloads its speech model (one time only, about 2.5 GB), showing size, speed and time left.
    If your internet drops, Ivy carries on by itself; if it gives up, press **Retry**. Nothing already
    downloaded is lost, even if you close Ivy.
@@ -121,7 +121,7 @@ you. Click **More info**, then **Run anyway**. All the code is here, so anyone c
 
 For 64-bit PCs with Ubuntu 22.04 or later, Linux Mint 21 or later, Debian 12, or Fedora 37 or later.
 
-1. From the **[Linux release](https://github.com/raj-7676/IVY-/releases/tag/v0.2.8-linux)**, download
+1. From the **[Linux release](https://github.com/raj-7676/ivy-dictation/releases/tag/v0.2.8-linux)**, download
    `Ivy_0.2.8_amd64.deb` (Ubuntu, Mint, Debian) or `Ivy-0.2.8-1.x86_64.rpm` (Fedora).
 2. Open a terminal in the folder with the file and install it:
    - Ubuntu, Mint, Debian: `sudo apt install ./Ivy_0.2.8_amd64.deb`

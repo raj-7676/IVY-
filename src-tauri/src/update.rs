@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::Emitter;
 
-const LATEST: &str = "https://api.github.com/repos/raj-7676/IVY-/releases/latest";
+const LATEST: &str = "https://api.github.com/repos/raj-7676/ivy-dictation/releases/latest";
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize, Clone)]
@@ -77,7 +77,7 @@ fn latest_release() -> Result<Release, String> {
             .to_string()
     };
     Ok(Release {
-        page: v["html_url"].as_str().unwrap_or("https://github.com/raj-7676/IVY-/releases/latest").to_string(),
+        page: v["html_url"].as_str().unwrap_or("https://github.com/raj-7676/ivy-dictation/releases/latest").to_string(),
         setup_url: asset(&setup_name),
         sums_url: asset("SHA256SUMS.txt"),
         setup_name,

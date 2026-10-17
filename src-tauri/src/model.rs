@@ -24,7 +24,7 @@ use tauri::Emitter;
 /// the model itself Apache 2.0 + Commons Clause). Older releases were removed (Yash, 2026-10-08). The files
 /// themselves are unchanged. A new model means new names, sizes and hashes here AND in
 /// src-tauri/installer/hooks.nsh (package-installer.mjs checks both against the real files).
-const BASE_URL: &str = "https://github.com/raj-7676/IVY-/releases/download/v0.2.6";
+const BASE_URL: &str = "https://github.com/raj-7676/ivy-dictation/releases/download/v0.2.6";
 pub const FILES: [(&str, u64, &str); 2] = [
     ("mmproj-ivy-lite-f16.gguf", 641_774_016, "07ed1cc9c96c19aba84354b9135c69332747a98d50363a321bf1418aececfc00"),
     ("ivy-lite-Q8_0.gguf", 1_834_422_208, "da50c4dcfc9bb36baeca3a5dedb742988dbe1058ab282dbb62d8a31be27795ed"),

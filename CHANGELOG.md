@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Ivy. Downloads are on the [Releases page](https://github.com/raj-7676/IVY-/releases).
+All notable changes to Ivy. Downloads are on the [Releases page](https://github.com/raj-7676/ivy-dictation/releases).
 
 ## 0.2.8 (2026-10-09)
 
@@ -49,7 +49,7 @@ All notable changes to Ivy. Downloads are on the [Releases page](https://github.
 ## 0.2.1 (2026-10-07)
 
 - One-file install: download just `Ivy_0.2.1_x64-setup.exe` and run it. If the speech model isn't next to it, setup downloads it (2.4 GB, with a progress window; run setup again to resume an interrupted download). Updates keep the model you already have.
-- Or install with one command in PowerShell: `irm https://raw.githubusercontent.com/raj-7676/IVY-/main/install.ps1 | iex`.
+- Or install with one command in PowerShell: `irm https://raw.githubusercontent.com/raj-7676/ivy-dictation/main/install.ps1 | iex`.
 - Every model file, copied or downloaded, is checked against its SHA-256 fingerprint before Ivy uses it.
 
 ## 0.2.0 (2026-10-07)

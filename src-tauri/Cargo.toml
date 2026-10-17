@@ -4,7 +4,7 @@ version = "0.2.8"
 description = "Ivy - offline voice dictation"
 authors = ["Yashvanraj"]
 license-file = "../LICENSE"
-repository = "https://github.com/raj-7676/IVY-"
+repository = "https://github.com/raj-7676/ivy-dictation"
 edition = "2021"
 rust-version = "1.77.2"
 

@@ -12,7 +12,7 @@ import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const RELEASE = 'https://github.com/raj-7676/IVY-/releases/download/v0.2.6';
+const RELEASE = 'https://github.com/raj-7676/ivy-dictation/releases/download/v0.2.6';
 const SHA256 = {
   'ivy-lite-Q8_0.gguf': 'da50c4dcfc9bb36baeca3a5dedb742988dbe1058ab282dbb62d8a31be27795ed',
   'mmproj-ivy-lite-f16.gguf': '07ed1cc9c96c19aba84354b9135c69332747a98d50363a321bf1418aececfc00',

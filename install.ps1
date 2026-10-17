@@ -1,7 +1,7 @@
 # Installs Ivy from the latest GitHub release: downloads the setup file, checks it, runs it, and starts Ivy.
 # Paste into PowerShell:
 #
-#   irm https://raw.githubusercontent.com/raj-7676/IVY-/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/raj-7676/ivy-dictation/main/install.ps1 | iex
 #
 # Same result as downloading the setup file and double-clicking it. Ivy then downloads its speech model
 # (about 2.5 GB, one time) itself, with progress in its window.
@@ -10,7 +10,7 @@
 $ErrorActionPreference = 'Stop'
 
 function Install-Ivy {
-    $repo = 'raj-7676/IVY-'
+    $repo = 'raj-7676/ivy-dictation'
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'Ivy needs 64-bit Windows.' }
     if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) { throw 'curl.exe is missing (it ships with Windows 10 1803 and later).' }
 

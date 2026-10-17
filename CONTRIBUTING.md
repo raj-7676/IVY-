@@ -4,7 +4,7 @@ Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
 ## Reporting a bug
 
-Open an [issue](https://github.com/raj-7676/IVY-/issues/new/choose) with:
+Open an [issue](https://github.com/raj-7676/ivy-dictation/issues/new/choose) with:
 - what you said (or roughly), what Ivy typed, and what you expected
 - GPU or CPU mode, your Windows version and graphics card
 - the app you were dictating into

@@ -44,7 +44,7 @@ responding, you may disclose after 90 days.
 ## Scope
 
 **In scope**
-- The Ivy app and its installer from this repository and its [Releases](https://github.com/raj-7676/IVY-/releases)
+- The Ivy app and its installer from this repository and its [Releases](https://github.com/raj-7676/ivy-dictation/releases)
 - Anything that makes Ivy send data over the network, keep recordings or text longer than promised,
   type text into the wrong window, or run code it shouldn't
 - How Ivy loads its speech model files
